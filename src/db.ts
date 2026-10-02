@@ -10,6 +10,8 @@ export interface Account {
   id: string;
   username: string;
   createdAt: number;
+  /** "algo$hex" password hash. Absent for legacy password-less accounts. */
+  passHash?: string;
 }
 
 export interface GameRecord {
@@ -111,12 +113,17 @@ function getAll<T>(store: IDBObjectStore): Promise<T[]> {
 
 // ---- accounts (simple username creation) ----
 
-export async function createAccount(username: string): Promise<Account> {
+export async function createAccount(
+  username: string,
+  password: string
+): Promise<Account> {
   const clean = username.trim().slice(0, 24);
   if (!clean) throw new Error("Username is required.");
   if (!/^[A-Za-z0-9 _-]+$/.test(clean)) {
     throw new Error("Use letters, numbers, spaces, - or _.");
   }
+  if (password.length < 4) throw new Error("Password needs at least 4 characters.");
+  if (password.length > 64) throw new Error("Password is too long (max 64).");
   const db = await openDb();
   try {
     const existing = await tx<Account | undefined>(
@@ -126,7 +133,13 @@ export async function createAccount(username: string): Promise<Account> {
       (t) => t.objectStore("accounts").index("by-username").get(clean)
     );
     if (existing) throw new Error(`Account "${clean}" already exists.`);
-    const account: Account = { id: makeId("acc"), username: clean, createdAt: Date.now() };
+    const { hashPassword } = await import("./auth");
+    const account: Account = {
+      id: makeId("acc"),
+      username: clean,
+      createdAt: Date.now(),
+      passHash: await hashPassword(clean, password),
+    };
     await tx(db, ["accounts"], "readwrite", (t) =>
       t.objectStore("accounts").add(account)
     );
@@ -332,6 +345,24 @@ export async function listSessions(
     const all = await getAll<GameSession>(t.objectStore("sessions"));
     return all
       .filter((s) => s.accountId === accountId && s.gameId === gameId)
+      .sort((a, b) => b.playedAt - a.playedAt)
+      .slice(0, limit);
+  } finally {
+    db.close();
+  }
+}
+
+/** Recent sessions for an account across ALL games, newest first. */
+export async function listRecentSessions(
+  accountId: string,
+  limit = 25
+): Promise<GameSession[]> {
+  const db = await openDb();
+  try {
+    const t = db.transaction(["sessions"], "readonly");
+    const all = await getAll<GameSession>(t.objectStore("sessions"));
+    return all
+      .filter((s) => s.accountId === accountId)
       .sort((a, b) => b.playedAt - a.playedAt)
       .slice(0, limit);
   } finally {

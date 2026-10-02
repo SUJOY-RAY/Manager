@@ -11,6 +11,11 @@ export interface GameService {
   port: number;
   controls: string;
   accent: string;
+  /** Card icon shown on the dashboard (served from the hub). */
+  icon: string;
+  genre: string;
+  /** Short hover text explaining what clicking the card does. */
+  blurb: string;
 }
 
 export const GAME_SERVICES: GameService[] = [
@@ -21,8 +26,11 @@ export const GAME_SERVICES: GameService[] = [
       "Canvas arcade shooter. Dodge, shoot, survive. Scores stream back to the hub.",
     devUrl: "http://localhost:5101",
     port: 5101,
-    controls: "Arrows / WASD move · Space shoot · R restart",
+    controls: "Arrows / WASD move · Space shoot · R restart · Q quit",
     accent: "#00dcff",
+    icon: "/icons/space-shooter.svg",
+    genre: "Arcade",
+    blurb: "Click to launch Space Shooter in the hub player. Progress auto-saves to your active account.",
   },
 ];
 

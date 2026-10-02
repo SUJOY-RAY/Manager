@@ -4,29 +4,60 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Game Manager Hub</title>
-  <script type="module" crossorigin src="/assets/index-c-PsEExW.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CaHoa9xQ.css">
+  <script type="module" crossorigin src="/assets/index-Aauh-Cn4.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CORDYlTq.css">
 </head>
 <body>
-  <header>
-    <h1>🕹️ GAME MANAGER</h1>
-    <span class="sub">microservices hub · accounts + progress stored in IndexedDB</span>
+  <!-- Central parent container: everything in the hub renders through
+       its three panes: left (nav), center (views), right (tools). -->
+  <div id="app">
+  <header id="topbar">
+    <button id="sidebar-toggle" class="ghost icon-btn" aria-label="Toggle navigation sidebar" title="Navigation sidebar">☰</button>
+    <div id="topbar-search">
+      <input id="game-search" type="text" maxlength="40" placeholder="Search anything…" autocomplete="off" aria-label="Search games" />
+      <span class="search-icon" aria-hidden="true">⌕</span>
+    </div>
+    <button id="bell-btn" class="ghost icon-btn" aria-label="Notifications — recent sessions" title="Recent sessions">
+      🔔<span id="bell-badge" class="count-badge" hidden></span>
+    </button>
+    <button id="avatar-chip" aria-label="Signed-in account — go to accounts">
+      <span id="avatar-initials">–</span><span id="avatar-name">Guest</span><span class="chev-r">›</span>
+    </button>
+    <button id="rightbar-toggle" class="ghost icon-btn" aria-label="Toggle tools sidebar" title="Tools sidebar">⚡</button>
   </header>
-  <main>
-    <section class="card" aria-label="accounts">
-      <h2>ACCOUNTS</h2>
-      <div class="row">
-        <input id="username" type="text" maxlength="24" placeholder="new username…" autocomplete="off" />
-        <button id="create">Create</button>
+  <div id="layout">
+    <aside id="sidebar" aria-label="Navigation sidebar">
+      <div class="side-top"><button id="hide-left" class="ghost side-x" aria-label="Hide navigation sidebar" title="Hide sidebar">✕</button></div>
+      <div class="logo"><span class="logo-mark">◼</span><span>Game Manager</span></div>
+      <nav aria-label="Primary">
+        <button id="nav-games" class="nav-card" aria-label="Go to dashboard">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-label"><b>Dashboard</b><small>Overview &amp; key metrics</small></span>
+          <span class="chev-r">›</span>
+        </button>
+        <button id="nav-accounts" class="nav-card" aria-label="Go to accounts page">
+          <span class="nav-icon">👤</span>
+          <span class="nav-label"><b>Accounts</b><small id="nav-accounts-sub">manage local accounts</small></span>
+          <span id="nav-accounts-badge" class="nav-badge" hidden></span>
+        </button>
+        <button id="nav-records" class="nav-card" aria-label="Go to records page">
+          <span class="nav-icon">📋</span>
+          <span class="nav-label"><b>Records</b><small>Run history &amp; scores</small></span>
+          <span class="chev-r">›</span>
+        </button>
+      </nav>
+      <div class="side-foot"><span class="dot on"></span><span>System Online<br /><small>v1.0.0</small></span></div>
+    </aside>
+    <main>
+    <section aria-label="dashboard" id="view-dashboard">
+      <div class="page-head">
+        <div><h2>Dashboard</h2><p class="hint">Here's what's happening with your games.</p></div>
       </div>
-      <p class="hint">Simple account creation — each account gets its own Space Shooter progress entry.</p>
-      <div id="accounts"></div>
-    </section>
-
-    <section aria-label="games">
+      <div id="stat-cards" class="stat-cards"></div>
       <div class="card game-card">
-        <h2>SERVICES</h2>
-        <div id="services"></div>
+        <div class="panel-head"><h2>GAMES</h2><span id="games-count" class="hint"></span></div>
+        <div id="services" class="dash-grid"></div>
+        <p id="no-games" class="hint" hidden>No games match your search.</p>
       </div>
       <div id="stage" class="card" hidden>
         <h2 id="stage-title">NOW PLAYING</h2>
@@ -38,12 +69,134 @@
         </div>
       </div>
       <div class="card game-card">
-        <h2>PROGRESS (IndexedDB)</h2>
+        <div class="panel-head"><h2>RECENT RECORDS</h2><button id="view-all-records" class="ghost link-btn">View All ›</button></div>
+        <table class="rec-table">
+          <thead><tr><th>Game</th><th>Score</th><th>Played At</th></tr></thead>
+          <tbody id="recent-tbody"></tbody>
+        </table>
+      </div>
+      <div class="duo">
+        <div class="card game-card">
+          <h2>QUICK ACTIONS</h2>
+          <div class="qa-grid">
+            <button id="qa-play" class="qa-btn"><span>▶</span> Play</button>
+            <button id="qa-account" class="qa-btn"><span>👤</span> Account</button>
+            <button id="qa-records" class="qa-btn"><span>📋</span> Records</button>
+            <button id="qa-details" class="qa-btn"><span>ⓘ</span> Details</button>
+          </div>
+        </div>
+        <div class="card game-card">
+          <h2>SYSTEM STATUS</h2>
+          <ul id="sys-status" class="status-list"></ul>
+        </div>
+      </div>
+    </section>
+    <section aria-label="accounts page" id="view-accounts" hidden>
+      <div class="row" style="margin-bottom:12px">
+        <button id="back-to-games" class="ghost">← Games</button>
+      </div>
+      <section id="accounts-card" class="card" aria-label="accounts">
+        <h2>ACCOUNTS</h2>
+        <div class="row">
+          <input id="username" type="text" maxlength="24" placeholder="new username…" autocomplete="off" />
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input id="password" type="password" maxlength="64" placeholder="password (min 4 chars)" autocomplete="new-password" />
+          <button id="create">Create</button>
+        </div>
+        <p class="hint">Local accounts are password-protected (hashed, stays in this browser) — each gets its own Space Shooter progress entry.</p>
+        <div id="accounts"></div>
+      </section>
+    </section>
+    <section aria-label="records page" id="view-records" hidden>
+      <div class="row" style="margin-bottom:12px">
+        <button id="back-to-games-2" class="ghost">← Games</button>
+      </div>
+      <div class="card game-card">
+        <h2>RECORDS</h2>
+        <p id="records-sub" class="hint"></p>
+        <table class="rec-table">
+          <thead><tr><th>Game</th><th>Score</th><th>Played At</th></tr></thead>
+          <tbody id="records-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+    </main>
+    <aside id="rightbar" aria-label="Tools sidebar">
+      <div class="side-top right"><button id="hide-right" class="ghost side-x" aria-label="Hide tools sidebar" title="Hide sidebar">✕</button></div>
+      <div class="rail-label">⚡ Quick Tools</div>
+      <div class="card game-card tools-card">
+        <button id="tool-notif" class="tool-row" aria-label="Notifications — recent sessions">
+          <span class="tool-icon">🔔</span>
+          <span class="nav-label"><b>Notifications</b><small>sessions today</small></span>
+          <span id="tool-notif-badge" class="count-badge" hidden></span>
+          <span class="chev-r">›</span>
+        </button>
+        <button id="tool-profile" class="tool-row" aria-label="Profile — go to accounts">
+          <span class="tool-icon">👤</span>
+          <span class="nav-label"><b>Profile</b><small id="tool-profile-sub">no account</small></span>
+          <span class="chev-r">›</span>
+        </button>
+        <button id="tool-help" class="tool-row" aria-label="Help">
+          <span class="tool-icon">?</span>
+          <span class="nav-label"><b>Help</b><small>controls &amp; tips</small></span>
+          <span class="chev-r">›</span>
+        </button>
+      </div>
+      <div class="rail-label">Hover Menu Example <span class="hint">hover ••• for the popup menu</span></div>
+      <div class="card game-card" id="services-card">
+        <div id="services-menu"></div>
+      </div>
+      <div class="card game-card" id="progress-card">
+        <h2 id="progress-title">PROGRESS <span id="save-where" class="save-tag">💾 LOCAL</span></h2>
+        <div class="row" style="margin-bottom:12px">
+          <select id="progress-game" aria-label="Select game to view progress"></select>
+        </div>
+        <div class="row save-switch" role="group" aria-label="Progress save location">
+          <span class="hint">Save to:</span>
+          <button id="save-local" class="seg-btn">💾 Local</button>
+          <button id="save-web" class="seg-btn" title="Web save is not implemented yet">☁️ Web <span class="todo-badge">TODO</span></button>
+        </div>
         <div id="progress"></div>
         <ul id="sessions" class="sessions"></ul>
       </div>
-    </section>
-  </main>
+      <div class="card hint-card">💡 Hover any <b>•••</b> on the right to access more options.</div>
+    </aside>
+  </div>
+  </div>
+  <div id="game-modal" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-name">
+      <div class="modal-head">
+        <img id="modal-icon" class="tile-icon" alt="" />
+        <div class="modal-titles">
+          <h3 id="modal-name"></h3>
+          <div class="tile-meta">
+            <span id="modal-dot" class="dot" title=""></span>
+            <span id="modal-genre" class="tile-genre"></span>
+            <span id="modal-best" class="tile-best"></span>
+          </div>
+        </div>
+        <button id="modal-close" class="ghost" aria-label="Close details">✕</button>
+      </div>
+      <p id="modal-desc" class="modal-desc"></p>
+      <p id="modal-controls" class="hint"></p>
+      <div class="row">
+        <button id="modal-play">▶ Play</button>
+        <button id="modal-tab" class="ghost">Open in new tab ↗</button>
+      </div>
+    </div>
+  </div>
+  <div id="auth-modal" class="modal-overlay" hidden>
+    <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <h3 id="auth-title">🔒 Sign in</h3>
+      <p id="auth-sub" class="hint"></p>
+      <input id="auth-password" type="password" maxlength="64" placeholder="password" autocomplete="current-password" />
+      <div class="row" style="margin-top:12px">
+        <button id="auth-submit">Unlock</button>
+        <button id="auth-cancel" class="ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
   <div id="toast" role="status"></div>
 </body>
 </html>
