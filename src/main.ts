@@ -8,21 +8,16 @@ import {
   ensureProgress,
   listAccounts,
   listSessions,
-  listRecentSessions,
+  listAllProgress,
   listProgressForAccount,
   getProgress,
   type Account,
-  type GameSession,
 } from "./db";
-import {
-  getSaveTarget,
-  requestSaveTarget,
-  saveRun,
-  WEB_SAVE_TODO,
-} from "./storage";
+import { saveRun } from "./storage";
 import { verifyPassword } from "./auth";
 import { makeCollapsibleCard, type CollapsibleCard } from "./cards";
 import { attachHoverPopup, esc, openMenu } from "./popup";
+import { hydrateIcons, icon } from "./icons";
 
 const ACTIVE_KEY = "gm.activeAccountId";
 
@@ -138,7 +133,15 @@ async function refreshAccounts(): Promise<void> {
       use.textContent = "Active ✓";
       use.disabled = true;
     } else {
-      use.textContent = a.passHash ? "🔒 Use" : "Use";
+      use.innerHTML = "";
+      if (a.passHash) {
+        const ic = document.createElement("span");
+        ic.className = "ic";
+        ic.innerHTML = icon("lock");
+        use.append(ic, document.createTextNode("Use"));
+      } else {
+        use.textContent = "Use";
+      }
       use.title = a.passHash ? "Password-protected — sign in to select" : "Select this account";
       use.onclick = () => {
         if (a.passHash) openAuthModal(a);
@@ -157,8 +160,11 @@ async function refreshAccounts(): Promise<void> {
     };
     if (a.id === activeId) {
       const out = document.createElement("button");
-      out.className = "ghost";
-      out.textContent = "⏻";
+      out.className = "ghost icon-btn-sm";
+      const outIc = document.createElement("span");
+      outIc.className = "ic";
+      outIc.innerHTML = icon("logout");
+      out.append(outIc);
       out.title = "Sign out (switch account)";
       out.setAttribute("aria-label", `Sign out ${a.username}`);
       out.onclick = signOut;
@@ -169,10 +175,9 @@ async function refreshAccounts(): Promise<void> {
     box.append(div, detail);
   }
   accountsCard?.setBadge(accounts.length > 0 ? String(accounts.length) : "");
-  refreshNavAccounts();
-  // If the game iframe is open, reload it so it carries the new account.
-  if (currentService && currentLaunchUrl) {
-    openInFrame(currentService);
+  // If a game is loaded, reload it silently so it carries the new account.
+  if (currentService) {
+    openInFrame(currentService, { reveal: false });
   }
 }
 
@@ -192,18 +197,8 @@ async function refreshServices(): Promise<void> {
   for (const s of services) {
     const card = createGameCard(s, account?.username ?? null, {
       onPlay: (svc) => openInFrame(svc),
-      onOpenTab: (svc) =>
-        window.open(launchUrl(svc, activeAccount()), "_blank", "noopener"),
-      onDetails: (svc) => void openGamePopup(svc),
     });
     box.append(card.root);
-
-    const cached = healthCache.get(s.id);
-    if (cached !== undefined) card.setOnline(cached);
-    checkHealth(s).then((ok) => {
-      healthCache.set(s.id, ok);
-      card.setOnline(ok);
-    });
 
     if (account) {
       getProgress(account.id, s.id)
@@ -225,34 +220,101 @@ function gameNameOf(gameId: string): string {
   return GAME_SERVICES.find((s) => s.id === gameId)?.name ?? gameId;
 }
 
-function sessionRow(h: GameSession): HTMLTableRowElement {
-  const tr = document.createElement("tr");
-  const g = document.createElement("td");
-  g.textContent = gameNameOf(h.gameId);
-  const s = document.createElement("td");
-  const pill = document.createElement("span");
-  pill.className = "score-pill";
-  pill.textContent = String(h.score);
-  s.append(pill);
-  const w = document.createElement("td");
-  w.className = "rec-when";
-  w.textContent = new Date(h.playedAt).toLocaleString();
-  tr.append(g, s, w);
-  return tr;
-}
-
-async function renderRecords(): Promise<void> {
-  const tb = el("records-tbody") as HTMLTableSectionElement;
-  tb.innerHTML = "";
-  const account = activeAccount();
-  if (!account) {
-    el("records-sub").textContent = "Sign in to see run records.";
+async function renderBestBars(): Promise<void> {
+  const box = el("best-bars");
+  box.innerHTML = "";
+  const rows = (await listAllProgress().catch(() => [])).filter(
+    (r) => r.totalPlays > 0
+  );
+  if (rows.length === 0) {
+    box.innerHTML = `<p class="hint">No scores yet — play a game to set the first best.</p>`;
     return;
   }
-  const rows = await listRecentSessions(account.id, 25).catch(() => []);
-  el("records-sub").textContent =
-    `${rows.length} run${rows.length === 1 ? "" : "s"} for ${account.username} · saved locally.`;
-  for (const h of rows) tb.append(sessionRow(h));
+  const byName = new Map(accounts.map((a) => [a.id, a.username]));
+  const sorted = [...rows].sort((a, b) => b.highScore - a.highScore);
+  const max = Math.max(...sorted.map((r) => r.highScore), 1);
+  for (const r of sorted) {
+    const row = document.createElement("div");
+    row.className = "bar-row";
+    const label = document.createElement("span");
+    label.className = "bar-label";
+    label.textContent = `${byName.get(r.accountId) ?? "deleted"} · ${gameNameOf(r.gameId)}`;
+    label.title = label.textContent;
+    const track = document.createElement("div");
+    track.className = "bar-track";
+    const fill = document.createElement("div");
+    fill.className = "bar-fill";
+    fill.style.width = "0%";
+    track.append(fill);
+    const val = document.createElement("span");
+    val.className = "bar-value";
+    val.textContent = String(r.highScore);
+    row.append(label, track, val);
+    box.append(row);
+    const pct = Math.max(3, Math.round((r.highScore / max) * 100));
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      fill.style.width = `${pct}%`;
+    } else {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          fill.style.width = `${pct}%`;
+        })
+      );
+    }
+  }
+}
+
+/** dd-mm-yyyy for the progress overview. */
+function fmtDate(t: number | null | undefined): string {
+  if (!t) return "—";
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
+async function renderAllProgress(): Promise<void> {
+  const tb = el("all-progress-tbody") as HTMLTableSectionElement;
+  tb.innerHTML = "";
+  const rows = await listAllProgress().catch(() => []);
+  const byName = new Map(accounts.map((a) => [a.id, a.username]));
+  const sorted = [...rows].sort((a, b) => {
+    const an = byName.get(a.accountId) ?? "";
+    const bn = byName.get(b.accountId) ?? "";
+    return an.localeCompare(bn) || a.gameId.localeCompare(b.gameId);
+  });
+  if (sorted.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "rec-when";
+    td.textContent = "No progress on this device yet — play a game to create the first entry.";
+    tr.append(td);
+    tb.append(tr);
+    return;
+  }
+  for (const r of sorted) {
+    const tr = document.createElement("tr");
+    const acc = document.createElement("td");
+    acc.textContent = byName.get(r.accountId) ?? "deleted account";
+    if (r.accountId === activeId) {
+      acc.textContent += " ✓";
+      acc.title = "Signed in";
+    }
+    const gm = document.createElement("td");
+    gm.textContent = gameNameOf(r.gameId);
+    const best = document.createElement("td");
+    const pill = document.createElement("span");
+    pill.className = "score-pill";
+    pill.textContent = String(r.highScore);
+    best.append(pill);
+    const plays = document.createElement("td");
+    plays.textContent = String(r.totalPlays);
+    const when = document.createElement("td");
+    when.className = "rec-when";
+    when.textContent = fmtDate(r.lastPlayedAt);
+    tr.append(acc, gm, best, plays, when);
+    tb.append(tr);
+  }
 }
 
 async function renderServicesMenu(): Promise<void> {
@@ -262,10 +324,10 @@ async function renderServicesMenu(): Promise<void> {
   for (const s of GAME_SERVICES) {
     const row = document.createElement("div");
     row.className = "svc-row";
-    const icon = document.createElement("img");
-    icon.className = "svc-icon";
-    icon.src = s.icon;
-    icon.alt = "";
+    const iconImg = document.createElement("img");
+    iconImg.className = "svc-icon";
+    iconImg.src = s.icon;
+    iconImg.alt = "";
     const label = document.createElement("div");
     label.className = "svc-label";
     const b = document.createElement("b");
@@ -284,20 +346,20 @@ async function renderServicesMenu(): Promise<void> {
       e.stopPropagation();
       openMenu(kebab, [
         {
-          icon: "▶",
+          icon: icon("play"),
           label: account ? `Play as ${account.username}` : "Play here",
           onSelect: () => openInFrame(s),
         },
         {
-          icon: "↗",
+          icon: icon("external"),
           label: "Open in new tab",
           onSelect: () =>
             window.open(launchUrl(s, activeAccount()), "_blank", "noopener"),
         },
-        { icon: "ⓘ", label: "Details", onSelect: () => void openGamePopup(s) },
+        { icon: icon("info"), label: "Details", onSelect: () => void renderInfoPanel(s, true) },
       ]);
     };
-    row.append(icon, label, dot, kebab);
+    row.append(iconImg, label, dot, kebab);
     box.append(row);
     const cached = healthCache.get(s.id);
     const apply = (ok: boolean) => {
@@ -309,7 +371,6 @@ async function renderServicesMenu(): Promise<void> {
     checkHealth(s).then((ok) => {
       healthCache.set(s.id, ok);
       apply(ok);
-      void renderStatus();
     });
   }
 }
@@ -320,50 +381,54 @@ async function renderTopbar(): Promise<void> {
     ? account.username.slice(0, 2).toUpperCase()
     : "–";
   el("avatar-name").textContent = account?.username ?? "Guest";
-  el("tool-profile-sub").textContent = account
-    ? `signed in as ${account.username}`
-    : "no account — click to sign in";
-  let today = 0;
+  // Badge = games where another account holds a greater best than you.
+  const badge = el("bell-badge");
+  let surpassed = 0;
   if (account) {
-    const all = await listRecentSessions(account.id, 200).catch(() => []);
-    const day = new Date().toDateString();
-    today = all.filter((h) => new Date(h.playedAt).toDateString() === day).length;
+    const rows = await listAllProgress().catch(() => []);
+    for (const s of GAME_SERVICES) {
+      const mine = rows.find(
+        (r) => r.accountId === account.id && r.gameId === s.id
+      );
+      if (!mine || mine.totalPlays === 0) continue;
+      const bestOfRest = Math.max(
+        0,
+        ...rows
+          .filter((r) => r.accountId !== account.id && r.gameId === s.id)
+          .map((r) => r.highScore)
+      );
+      if (bestOfRest > mine.highScore) surpassed++;
+    }
   }
-  for (const id of ["bell-badge", "tool-notif-badge"]) {
-    const badge = el(id);
-    badge.textContent = today > 0 ? String(today) : "";
-    badge.hidden = today === 0;
-  }
+  badge.textContent = surpassed > 0 ? String(surpassed) : "";
+  badge.hidden = surpassed === 0;
 }
 
 function wireConsole(): void {
-  el("avatar-chip").onclick = () => showView("accounts");
-  el("bell-btn").onclick = () => showView("records");
-  el("tool-notif").onclick = () => showView("records");
-  el("tool-profile").onclick = () => showView("accounts");
-  el("tool-help").onclick = () =>
-    toast("Move: Arrows/WASD · Shoot: Space · Restart: R · Quit: Q. Runs save locally per account.");
+  el("avatar-chip").onclick = (e) => {
+    e.stopPropagation();
+    openAccountMenu();
+  };
+  el("bell-btn").onclick = () => showView("progress");
 }
 
-// ---------- exterior details popup ----------
+// ---------- game info panel (right rail) ----------
 
-let modalService: GameService | null = null;
+let infoService: GameService | null = null;
 
-async function openGamePopup(service: GameService): Promise<void> {
-  modalService = service;
+async function renderInfoPanel(service: GameService, reveal = false): Promise<void> {
+  infoService = service;
   const account = activeAccount();
-  const overlay = el("game-modal");
-  (el("modal-icon") as HTMLImageElement).src = service.icon;
-  (el("modal-icon") as HTMLImageElement).alt = `${service.name} icon`;
-  el("modal-name").textContent = service.name;
-  el("modal-genre").textContent = service.genre;
-  el("modal-desc").textContent = `${service.description} ${service.blurb}`;
-  el("modal-controls").textContent = `Controls: ${service.controls}. Service: ${service.devUrl}`;
-  (el("modal-play") as HTMLButtonElement).textContent = account
+  (el("info-icon") as HTMLImageElement).src = service.icon;
+  el("info-name").textContent = service.name;
+  el("info-genre").textContent = service.genre;
+  el("info-desc").textContent = `${service.description} ${service.blurb}`;
+  el("info-controls").textContent = `Controls: ${service.controls}.`;
+  (el("info-play") as HTMLButtonElement).textContent = account
     ? `▶ Play as ${account.username}`
     : "▶ Play";
 
-  const dot = el("modal-dot");
+  const dot = el("info-dot");
   dot.className = "dot";
   dot.title = "Probing service…";
   const cached = healthCache.get(service.id);
@@ -375,68 +440,36 @@ async function openGamePopup(service: GameService): Promise<void> {
   if (cached !== undefined) applyOnline(cached);
   checkHealth(service).then((ok) => {
     healthCache.set(service.id, ok);
-    if (modalService?.id === service.id) applyOnline(ok);
+    if (infoService?.id === service.id) applyOnline(ok);
   });
 
-  const best = el("modal-best");
+  const best = el("info-best");
   best.textContent = "";
   if (account) {
     const p = await getProgress(account.id, service.id).catch(() => null);
-    if (modalService?.id !== service.id) return;
+    if (infoService?.id !== service.id) return;
     best.textContent =
       p && p.totalPlays > 0 ? `★ best ${p.highScore}` : "★ no runs yet";
   }
 
-  overlay.hidden = false;
-  (el("modal-close") as HTMLButtonElement).focus();
+  if (reveal) {
+    // Info lives on the right — make sure its rail is visible.
+    setRightbar(true);
+    el("info-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 }
 
-function closeGamePopup(): void {
-  el("game-modal").hidden = true;
-  modalService = null;
-}
-
-function wireGamePopup(): void {
-  el("modal-close").onclick = closeGamePopup;
-  el("game-modal").addEventListener("click", (e) => {
-    if (e.target === el("game-modal")) closeGamePopup();
-  });
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !el("game-modal").hidden) closeGamePopup();
-  });
-  el("modal-play").onclick = () => {
-    if (!modalService) return;
-    const svc = modalService;
-    closeGamePopup();
-    openInFrame(svc);
+function wireInfoPanel(): void {
+  el("info-play").onclick = () => {
+    if (infoService) openInFrame(infoService);
   };
-  el("modal-tab").onclick = () => {
-    if (!modalService) return;
-    window.open(launchUrl(modalService, activeAccount()), "_blank", "noopener");
+  el("info-tab").onclick = () => {
+    if (infoService)
+      window.open(launchUrl(infoService, activeAccount()), "_blank", "noopener");
   };
 }
 
-// ---------- save location (local live / web TODO) ----------
-
-function refreshSaveSwitch(): void {
-  const target = getSaveTarget();
-  (el("save-local") as HTMLButtonElement).classList.toggle("active", target === "local");
-  (el("save-web") as HTMLButtonElement).classList.toggle("active", target === "web");
-  el("save-where").textContent = target === "local" ? "💾 LOCAL" : "☁️ WEB";
-}
-
-function wireSaveSwitch(): void {
-  el("save-local").onclick = () => {
-    requestSaveTarget("local");
-    refreshSaveSwitch();
-  };
-  el("save-web").onclick = () => {
-    requestSaveTarget("web"); // no-op until the web backend lands
-    refreshSaveSwitch();
-    toast(WEB_SAVE_TODO);
-  };
-}
-
+// (Web save removed for now — everything persists locally via IndexedDB.)
 // ---------- account sign-in (password gate for selecting an account) ----------
 
 let authAccount: Account | null = null;
@@ -506,7 +539,6 @@ function applySidebar(open: boolean): void {
 
 function wireSidebar(): void {
   el("sidebar-toggle").onclick = () => applySidebar(!isSidebarOpen());
-  el("hide-left").onclick = () => applySidebar(false);
   let stored: string | null = null;
   try {
     stored = localStorage.getItem(SIDEBAR_KEY);
@@ -519,38 +551,108 @@ function wireSidebar(): void {
 
 // ---------- sub-page views (dashboard ⇄ accounts, like the game stage) ----------
 
-type ViewName = "dashboard" | "accounts" | "records";
+type ViewName = "dashboard" | "accounts" | "progress" | "game";
 let currentView: ViewName = "dashboard";
+
+// Remember where the user is across reloads: the open game (if any) and the
+// current view. Only explicit Back/Quit navigates away.
+const VIEW_KEY = "gm.view";
+const OPEN_GAME_KEY = "gm.openGameId";
+
+function storeView(name: ViewName): void {
+  try {
+    localStorage.setItem(VIEW_KEY, name);
+  } catch {
+    /* ignore */
+  }
+}
+
+function readStoredView(): ViewName | null {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return v === "dashboard" || v === "accounts" || v === "progress" || v === "game"
+      ? v
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeOpenGame(gameId: string | null): void {
+  try {
+    if (gameId) localStorage.setItem(OPEN_GAME_KEY, gameId);
+    else localStorage.removeItem(OPEN_GAME_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function readStoredGame(): GameService | null {
+  try {
+    const id = localStorage.getItem(OPEN_GAME_KEY);
+    return GAME_SERVICES.find((s) => s.id === id) ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function showView(name: ViewName): void {
   currentView = name;
+  storeView(name);
+  // The game gets its own full sub-screen: rails step aside while playing.
+  document.body.classList.toggle("in-game", name === "game");
   el("view-dashboard").hidden = name !== "dashboard";
   el("view-accounts").hidden = name !== "accounts";
-  el("view-records").hidden = name !== "records";
-  (el("nav-games") as HTMLButtonElement).classList.toggle("active", name === "dashboard");
-  (el("nav-accounts") as HTMLButtonElement).classList.toggle("active", name === "accounts");
-  (el("nav-records") as HTMLButtonElement).classList.toggle("active", name === "records");
+  el("view-progress").hidden = name !== "progress";
+  el("view-game").hidden = name !== "game";
+  (el("nav-games") as HTMLButtonElement).classList.toggle("active", name === "dashboard" || name === "game");
+  (el("nav-progress") as HTMLButtonElement).classList.toggle("active", name === "progress" || name === "accounts");
+  (el("nav-progress") as HTMLButtonElement).classList.toggle("active", name === "progress");
   // Left-menu navigation always lands at the top of the center box.
   document.querySelector("main")?.scrollTo({ top: 0 });
 }
 
-function refreshNavAccounts(): void {
-  const account = activeAccount();
-  el("nav-accounts-sub").textContent = account
-    ? `signed in as ${account.username}`
-    : `${accounts.length} account${accounts.length === 1 ? "" : "s"} · click to manage`;
-  const badge = el("nav-accounts-badge");
-  badge.textContent = accounts.length > 0 ? String(accounts.length) : "";
-  badge.hidden = accounts.length === 0;
+/** Boot navigation: reopen the stored game, or fall back to the stored view. */
+function restoreView(): void {
+  const stored = readStoredView();
+  if (stored === "game") {
+    // Accounts load after this (refreshAll); openInFrame first builds a guest
+    // URL and refreshAccounts re-opens with the account URL once known.
+    const svc = readStoredGame();
+    if (svc) {
+      openInFrame(svc);
+      return;
+    }
+  }
+  showView(stored ?? "dashboard");
+}
+
+// Account switching lives in the topbar avatar menu (no sidebar entry).
+function openAccountMenu(): void {
+  const anchor = el("avatar-chip");
+  const items = accounts.map((a) => ({
+    icon: a.id === activeId ? icon("check") : a.passHash ? icon("lock") : icon("user"),
+    label: a.id === activeId ? `${a.username} (active)` : a.username,
+    onSelect: () => {
+      if (a.id === activeId) return;
+      if (a.passHash) openAuthModal(a);
+      else void selectAccount(a);
+    },
+  }));
+  items.push({
+    icon: icon("users"),
+    label: "Manage accounts…",
+    onSelect: () => showView("accounts"),
+  });
+  if (activeId) items.push({ icon: icon("logout"), label: "Sign out", onSelect: signOut });
+  openMenu(anchor, items);
 }
 
 function wireNav(): void {
   el("nav-games").onclick = () => showView("dashboard");
-  el("nav-accounts").onclick = () => showView("accounts");
-  el("nav-records").onclick = () => showView("records");
+  el("nav-progress").onclick = () => showView("progress");
   el("back-to-games").onclick = () => showView("dashboard");
-  el("back-to-games-2").onclick = () => showView("dashboard");
-  el("view-all-records").onclick = () => showView("records");
+  el("back-to-games-3").onclick = () => showView("dashboard");
 }
 
 function wireDashboardSearch(): void {
@@ -561,38 +663,41 @@ function wireDashboardSearch(): void {
   });
 }
 
-// ---------- stage (iframe embed) ----------
+// ---------- dedicated game screen (redirect target for Play) ----------
 
-function openInFrame(service: GameService): void {
+function openInFrame(service: GameService, opts?: { reveal?: boolean }): void {
+  const reveal = opts?.reveal ?? true;
   currentService = service;
-  showView("dashboard");
+  storeOpenGame(service.id);
   const account = activeAccount();
-  // The right sidebar follows the game being played.
+  // The progress tracker follows the game being played.
   selectedGameId = service.id;
   syncProgressGameSelect();
   void refreshProgress();
-  currentLaunchUrl = launchUrl(service, account);
-  el("stage").hidden = false;
-  (el("stage-title") as HTMLElement).textContent =
-    `NOW PLAYING — ${service.name}` + (account ? ` as ${account.username}` : " (guest, no account)");
+  const url = launchUrl(service, account);
   const frame = el("game-frame") as HTMLIFrameElement;
-  frame.src = currentLaunchUrl;
-  // Move focus off the Play button (space would re-click it) and into the game.
-  (document.activeElement as HTMLElement | null)?.blur?.();
-  frame.onload = () => {
-    try {
-      frame.contentWindow?.focus();
-    } catch {
-      /* cross-origin focus is best-effort */
-    }
-  };
-  el("live").textContent = account
-    ? `Progress will save locally for ${account.username} (save: ${getSaveTarget()}).`
-    : "No active account — select or create one to save progress.";
-  el("stage").scrollIntoView({ behavior: "smooth", block: "start" });
+  if (currentLaunchUrl !== url) {
+    currentLaunchUrl = url;
+    frame.src = url;
+    // Move focus off the Play button (space would re-click it) and into the game.
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    frame.onload = () => {
+      try {
+        frame.contentWindow?.focus();
+      } catch {
+        /* cross-origin focus is best-effort */
+      }
+    };
+  }
+  el("game-nav-title").textContent =
+    service.name + (account ? ` · ${account.username}` : " · guest");
+  el("game-live").textContent = account
+    ? `Saving locally for ${account.username}.`
+    : "Guest — select an account to save progress.";
+  if (reveal) showView("game");
 }
 
-// While a game is embedded, arrows/space belong to the game — stop them
+// While a game screen is open, arrows/space belong to the game — stop them
 // from scrolling the hub page (e.g. when focus is outside the iframe).
 function wireScrollLock(): void {
   const GAME_KEYS = new Set([
@@ -605,7 +710,7 @@ function wireScrollLock(): void {
   window.addEventListener(
     "keydown",
     (e) => {
-      if (el("stage").hidden) return;
+      if (currentView !== "game") return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
       if (GAME_KEYS.has(e.key.toLowerCase())) e.preventDefault();
@@ -614,18 +719,71 @@ function wireScrollLock(): void {
   );
 }
 
-function closeStage(): void {
-  if (el("stage").hidden) return;
-  el("stage").hidden = true;
+/** Quit: unload the game and return to the dashboard. */
+function quitGame(): void {
   (el("game-frame") as HTMLIFrameElement).src = "about:blank";
   currentService = null;
   currentLaunchUrl = "";
-  el("live").textContent = "";
+  storeOpenGame(null);
+  el("game-live").textContent = "";
+  showView("dashboard");
+  toast("Quit to dashboard.");
 }
 
-function wireStage(): void {
-  el("close-game").onclick = closeStage;
-  el("open-tab").onclick = () => {
+function wireGameNav(): void {
+  const wrap = el("game-stage");
+  const toggle = el("game-nav-toggle") as HTMLButtonElement;
+  const setOpen = (open: boolean) => {
+    wrap.classList.toggle("open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+  };
+  // Corner-button toggle for touch/keyboard (hover reveals on desktop).
+  toggle.onclick = (e) => {
+    e.stopPropagation();
+    setOpen(!wrap.classList.contains("open"));
+    // A pointer click leaves focus on the button, and :focus-within would
+    // then pin the bar open — release focus so hover alone governs it.
+    // (Keyboard activation keeps focus so tabbing through still works.)
+    if (e.detail > 0) toggle.blur();
+  };
+  // Auto-hide: tapping/clicking outside, tabbing away, focusing the game
+  // itself, or Escape. (Focus is checked against the bar, not the stage —
+  // focus landing in the game iframe must close the menu, not pin it.)
+  const bar = el("game-navbar");
+  document.addEventListener("pointerdown", (e) => {
+    if (!wrap.contains(e.target as Node)) setOpen(false);
+  });
+  wrap.addEventListener("focusout", (e) => {
+    // relatedTarget is null on programmatic blur() (e.g. right after the
+    // toggle click releases focus) — that must not close the just-opened bar.
+    const next = (e as FocusEvent).relatedTarget as Node | null;
+    if (!next) return;
+    if (!bar.contains(next)) setOpen(false);
+  });
+  // Clicking into the game frame blurs the outer window (no pointerdown
+  // reaches this document) — treat that as dismissing the menu too.
+  window.addEventListener("blur", () => setOpen(false));
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      setOpen(false);
+      toggle.blur();
+    }
+  });
+  // Back keeps the game loaded (resume via Play); Quit unloads it.
+  // Blur the clicked button so :focus-within doesn't pin the bar open after.
+  el("game-back").onclick = (e) => {
+    setOpen(false);
+    (e.currentTarget as HTMLElement).blur();
+    showView("dashboard");
+  };
+  el("game-quit").onclick = (e) => {
+    setOpen(false);
+    (e.currentTarget as HTMLElement).blur();
+    quitGame();
+  };
+  el("open-tab").onclick = (e) => {
+    setOpen(false);
+    (e.currentTarget as HTMLElement).blur();
     if (currentLaunchUrl) window.open(currentLaunchUrl, "_blank", "noopener");
   };
 }
@@ -653,7 +811,11 @@ function refreshProgressGameOptions(): void {
   sel.value = selectedGameId;
 }
 
+let progressGen = 0;
 async function refreshProgress(): Promise<void> {
+  // Generation guard: overlapping calls (tile click + refreshAll, select
+  // change + game over…) interleave across awaits and would append twice.
+  const gen = ++progressGen;
   const box = el("progress");
   const sess = el("sessions");
   box.innerHTML = "";
@@ -666,6 +828,7 @@ async function refreshProgress(): Promise<void> {
     return;
   }
   const rows = await listProgressForAccount(account.id);
+  if (gen !== progressGen) return;
   const prog = rows.find((r) => r.gameId === game.id);
   const plays = prog?.totalPlays ?? 0;
   const plural = plays === 1 ? "" : "s";
@@ -722,6 +885,7 @@ async function refreshProgress(): Promise<void> {
   box.append(grid);
 
   const history = await listSessions(account.id, game.id, 8);
+  if (gen !== progressGen) return;
   if (history.length === 0) {
     const p = document.createElement("p");
     p.className = "hint";
@@ -738,7 +902,7 @@ async function refreshProgress(): Promise<void> {
           `<b>${esc(game.name)} run</b><br>` +
           `Score <b>${h.score}</b><br>` +
           `${esc(new Date(h.playedAt).toLocaleString())}<br>` +
-          `${esc(account.username)} · saved locally 💾`
+          `${esc(account.username)} · saved locally`
       );
       sess.append(li);
     }
@@ -756,29 +920,29 @@ function wireProgressSelect(): void {
 
 const RIGHTBAR_KEY = "gm.rightOpen";
 
+function setRightbar(open: boolean): void {
+  document.body.classList.toggle("right-collapsed", !open);
+  (el("rightbar-toggle") as HTMLButtonElement).setAttribute(
+    "aria-expanded",
+    String(open)
+  );
+  try {
+    localStorage.setItem(RIGHTBAR_KEY, open ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
 function wireRightbar(): void {
-  const apply = (open: boolean) => {
-    document.body.classList.toggle("right-collapsed", !open);
-    (el("rightbar-toggle") as HTMLButtonElement).setAttribute(
-      "aria-expanded",
-      String(open)
-    );
-    try {
-      localStorage.setItem(RIGHTBAR_KEY, open ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
-  };
   el("rightbar-toggle").onclick = () =>
-    apply(document.body.classList.contains("right-collapsed"));
-  el("hide-right").onclick = () => apply(false);
+    setRightbar(document.body.classList.contains("right-collapsed"));
   let stored: string | null = null;
   try {
     stored = localStorage.getItem(RIGHTBAR_KEY);
   } catch {
     stored = null;
   }
-  apply(stored !== null ? stored === "1" : window.innerWidth > 1100);
+  setRightbar(stored !== null ? stored === "1" : window.innerWidth > 1100);
 }
 
 // ---------- incoming game events (postMessage from microservices) ----------
@@ -796,21 +960,19 @@ function wireGameEvents(): void {
     if (!msg || msg.source !== "space-shooter") return;
     const account = activeAccount();
     if (msg.type === "SCORE_TICK" && typeof msg.score === "number") {
-      el("live").textContent = account
-        ? `🛰 ${account.username} playing… live score ${msg.score}`
-        : `🛰 guest playing… live score ${msg.score}`;
+      el("game-live").textContent = account
+        ? `${account.username} playing… live score ${msg.score}`
+        : `guest playing… live score ${msg.score}`;
       return;
     }
     if (msg.type === "QUIT_TO_HUB") {
-      closeStage();
-      toast("Quit to dashboard.");
-      el("stage").scrollIntoView({ behavior: "smooth", block: "center" });
+      quitGame();
       return;
     }
     if (msg.type === "GAME_OVER" && typeof msg.score === "number") {
       if (!account) {
         toast(`Game over — score ${msg.score} (no active account, not saved).`);
-        el("live").textContent = `Game over — score ${msg.score}. Select an account to save runs.`;
+        el("game-live").textContent = `Game over — score ${msg.score}. Select an account to save runs.`;
         return;
       }
       const gameId =
@@ -819,9 +981,9 @@ function wireGameEvents(): void {
           : "space-shooter";
       const { progress } = await saveRun(account.id, gameId, msg.score);
       toast(
-        `💾 Saved locally: ${account.username} scored ${msg.score} (best ${progress.highScore}, ${progress.totalPlays} plays).`
+        `Saved locally: ${account.username} scored ${msg.score} (best ${progress.highScore}, ${progress.totalPlays} plays).`
       );
-      el("live").textContent = `Game over — ${msg.score} saved locally (IndexedDB) for ${account.username}.`;
+      el("game-live").textContent = `Game over — ${msg.score} saved locally (IndexedDB) for ${account.username}.`;
       if (selectedGameId !== gameId) {
         selectedGameId = gameId;
         syncProgressGameSelect();
@@ -838,15 +1000,16 @@ async function refreshAll(): Promise<void> {
   await refreshServices();
   refreshProgressGameOptions();
   await refreshProgress();
-  await renderStats();
-  await renderRecent();
-  await renderRecords();
+  await renderBestBars();
+  await renderAllProgress();
   await renderServicesMenu();
   await renderTopbar();
-  await renderStatus();
+  const info = infoService ?? selectedGame();
+  await renderInfoPanel(info);
 }
 
 async function boot(): Promise<void> {
+  hydrateIcons(document);
   accountsCard = makeCollapsibleCard("accounts", el("accounts-card"));
   progressCard = makeCollapsibleCard("progress", el("progress-card"));
   await ensureGameSeed(
@@ -870,7 +1033,7 @@ async function boot(): Promise<void> {
       pwInput.value = "";
       activeId = acc.id;
       localStorage.setItem(ACTIVE_KEY, acc.id);
-      toast(`🔒 Account "${acc.username}" created with a Space Shooter entry.`);
+      toast(`Account "${acc.username}" created with a Space Shooter entry.`);
       await refreshAll();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Could not create account.");
@@ -891,18 +1054,19 @@ async function boot(): Promise<void> {
     }
   }
 
-  wireStage();
+  wireGameNav();
   wireScrollLock();
   wireDashboardSearch();
-  wireGamePopup();
-  wireSaveSwitch();
-  refreshSaveSwitch();
+  wireInfoPanel();
   wireAuth();
   wireSidebar();
   wireRightbar();
   wireNav();
   wireConsole();
-  showView("dashboard");
+  // Restore where the user was instead of resetting: reopen the current game
+  // (the frame reloads its URL; the run itself restarts), or show the stored
+  // view. Only explicit Back/Quit navigates away from here.
+  restoreView();
   wireProgressSelect();
   refreshProgressGameOptions();
   wireGameEvents();

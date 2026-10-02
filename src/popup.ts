@@ -67,7 +67,7 @@ export function openMenu(anchor: HTMLElement, items: MenuItem[]): void {
     if (item.icon) {
       const ic = document.createElement("span");
       ic.className = "menu-icon";
-      ic.textContent = item.icon;
+      ic.innerHTML = item.icon;
       b.append(ic);
     }
     const lb = document.createElement("span");

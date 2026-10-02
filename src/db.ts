@@ -352,6 +352,17 @@ export async function listSessions(
   }
 }
 
+/** Every progress row on this device (all accounts × games). */
+export async function listAllProgress(): Promise<Progress[]> {
+  const db = await openDb();
+  try {
+    const t = db.transaction(["progress"], "readonly");
+    return await getAll<Progress>(t.objectStore("progress"));
+  } finally {
+    db.close();
+  }
+}
+
 /** Recent sessions for an account across ALL games, newest first. */
 export async function listRecentSessions(
   accountId: string,

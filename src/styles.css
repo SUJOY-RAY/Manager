@@ -56,8 +56,21 @@ html, body {
 #sidebar { width: 264px; flex: none; }
 #rightbar { width: 300px; flex: none; }
 main { flex: 1; min-width: 0; }
+/* Sidebars as proper rounded rects, clearly separated by the layout gap. */
+#sidebar, #rightbar {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
 body.sidebar-collapsed #sidebar { display: none; }
 body.right-collapsed #rightbar { display: none; }
+/* Game screen: the right rail steps aside, but the left nav still follows
+   its toggle (the topbar hamburger works mid-game). */
+body.in-game #rightbar { display: none !important; }
 
 /* ---- topbar ---- */
 #topbar {
@@ -75,12 +88,31 @@ body.right-collapsed #rightbar { display: none; }
   display: grid; place-items: center;
   font-size: 17px;
 }
+/* Header justification: menu stays at the left end, everything else docks right. */
+#bell-btn { margin-left: auto; }
 #topbar-search { position: relative; flex: 1; max-width: 520px; }
 #topbar-search input { width: 100%; padding-right: 40px; }
 #topbar-search .search-icon {
   position: absolute; right: 12px; top: 50%;
   transform: translateY(-50%); pointer-events: none; color: var(--muted);
 }
+/* PNG icon slots (public/icons). */
+.ic { display: inline-flex; flex: none; vertical-align: middle; }
+.ic svg, .ic img { width: 18px; height: 18px; display: block; object-fit: contain; }
+.nav-icon .ic svg, .nav-icon .ic img { width: 17px; height: 17px; }
+.search-icon .ic svg, .search-icon .ic img { width: 16px; height: 16px; }
+button .ic { margin-right: 2px; }
+.icon-btn-sm {
+  width: 32px; height: 32px; padding: 0;
+  display: grid; place-items: center;
+}
+.icon-btn-sm .ic svg, .icon-btn-sm .ic img { width: 16px; height: 16px; }
+/* Safety net: bare icon images (no .ic wrapper) still size correctly. */
+.icon-btn img { width: 18px; height: 18px; object-fit: contain; }
+.icon-btn-sm img { width: 16px; height: 16px; object-fit: contain; }
+.menu-icon { display: inline-flex; width: 18px; flex: none; }
+.menu-icon svg, .menu-icon img { width: 16px; height: 16px; object-fit: contain; }
+.hint-card .ic { margin-right: 4px; }
 .count-badge {
   position: absolute; top: -6px; right: -6px;
   min-width: 18px; height: 18px; padding: 0 5px;
@@ -127,19 +159,19 @@ body.right-collapsed #rightbar { display: none; }
   background: var(--glass-strong);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
-  border-color: var(--glass-border);
+  border-color: transparent;
   box-shadow: var(--glass-shadow);
 }
-.nav-card.active { background: var(--ink); color: var(--ink-text); }
-.nav-card.active .nav-label small { color: #cfcfcf; }
-.nav-card.active .chev-r { color: var(--ink-text); }
+.nav-card.active { background: #e4e4e7; color: var(--text); border-color: var(--ink); }
+.nav-card.active .nav-label small { color: #555; }
+.nav-card.active .chev-r { color: var(--text); }
 .nav-icon {
   width: 30px; height: 30px; flex: none;
   display: grid; place-items: center;
-  background: var(--panel-soft); border: 1px solid var(--line);
+  background: transparent; border: 1px solid transparent;
   border-radius: 8px; font-size: 15px;
 }
-.nav-card.active .nav-icon { background: transparent; border-color: #555; }
+.nav-card.active .nav-icon { background: transparent; border-color: var(--ink); }
 .nav-label { flex: 1; min-width: 0; }
 .nav-label b { display: block; font-size: 13.5px; }
 .nav-label small {
@@ -150,22 +182,8 @@ body.right-collapsed #rightbar { display: none; }
   flex: none; font-size: 11px; color: var(--ink-text); font-weight: bold;
   background: var(--ink); border-radius: 12px; padding: 1px 8px;
 }
-.nav-card.active .nav-badge { background: var(--ink-text); color: var(--ink); }
+.nav-card.active .nav-badge { background: var(--ink); color: var(--ink-text); }
 .nav-badge[hidden] { display: none; }
-.side-foot {
-  margin-top: 16px; padding: 10px 4px;
-  display: flex; gap: 8px; align-items: flex-start;
-  font-size: 12px; color: var(--muted); line-height: 1.5;
-}
-.side-foot small { color: var(--muted); }
-.side-top { display: flex; margin-bottom: 8px; }
-.side-top.right { justify-content: flex-end; }
-.side-x {
-  width: 30px; height: 30px; padding: 0;
-  display: grid; place-items: center;
-  font-size: 14px; line-height: 1;
-}
-
 /* ---- generic card / controls ---- */
 .card {
   background: var(--glass);
@@ -190,9 +208,17 @@ input:focus, select:focus, button:focus-visible {
 }
 select {
   flex: 1; min-width: 0;
-  background: rgba(255, 255, 255, 0.85); color: var(--text);
+  background-color: rgba(255, 255, 255, 0.85); color: var(--text);
   border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px;
   font-family: inherit;
+}
+/* Progress game picker: themed dropdown, not full-width native. */
+#progress-game {
+  flex: none; width: min(100%, 320px);
+  appearance: none; -webkit-appearance: none;
+  padding-right: 38px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236d6d70' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 14px center;
 }
 button {
   background: var(--ink); color: var(--ink-text);
@@ -210,7 +236,14 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 /* ---- center: page head + stat cards ---- */
 .page-head { margin: 2px 2px 14px; }
-.page-head h2 { font-size: 22px; margin: 0 0 2px; }
+.page-head h1 { font-size: 22px; margin: 0 0 2px; font-weight: 800; }
+/* Center search strip (magnifier pinned inside the right end). */
+#search-strip { position: relative; margin-bottom: 12px; }
+#search-strip input { display: block; width: 100%; padding-right: 40px; }
+#search-strip .search-icon {
+  position: absolute; right: 12px; top: 50%;
+  transform: translateY(-50%); pointer-events: none; color: var(--muted);
+}
 .stat-cards {
   display: grid; grid-template-columns: repeat(4, 1fr);
   gap: 12px; margin-bottom: 12px;
@@ -333,22 +366,6 @@ button:disabled { opacity: 0.45; cursor: default; }
 .stat span { font-size: 10px; color: var(--muted); }
 ul.sessions { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
 ul.sessions li { padding: 2px 0; border-radius: 4px; }
-.save-tag {
-  font-size: 10px; color: var(--ink);
-  border: 1px solid var(--ink);
-  border-radius: 12px; padding: 1px 8px; letter-spacing: 1px;
-  white-space: nowrap;
-}
-.save-switch { align-items: center; margin-bottom: 12px; }
-.seg-btn {
-  background: transparent; border: 1px solid var(--line-strong);
-  color: var(--muted); padding: 6px 12px; font-weight: normal;
-}
-.seg-btn.active { border-color: var(--ink); color: var(--text); background: var(--panel-soft); }
-.todo-badge {
-  font-size: 10px; color: var(--ink-text); background: var(--ink);
-  border-radius: 4px; padding: 0 5px; margin-left: 4px; font-weight: bold;
-}
 
 /* ---- game tiles (center dashboard) ---- */
 .dash-grid {
@@ -377,16 +394,15 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
   outline: none;
 }
-.tile-status { position: absolute; top: 8px; left: 8px; z-index: 2; }
 .tile-icon {
-  width: 64px; height: 64px; flex: none;
-  border-radius: 12px; pointer-events: none;
-  filter: grayscale(1) contrast(1.1);
+  width: 72px; height: 72px; flex: none;
+  border-radius: 14px; pointer-events: none;
+  margin: 4px auto;
 }
 .tile-name { margin: 0; font-size: 13px; text-align: center; color: var(--text); }
 .tile-best { color: var(--muted); font-size: 11px; font-weight: 600; }
-.tile-actions { display: flex; gap: 6px; position: absolute; top: 6px; right: 6px; z-index: 2; }
-.tile-mini { padding: 2px 7px; font-size: 12px; background: var(--panel); }
+/* Minimum 32px touch targets (proper control standards). */
+.kebab { min-width: 32px; min-height: 32px; }
 .tile-hover {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; justify-content: center;
@@ -404,19 +420,80 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
 .tile-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
 .tile-genre { border: 1px solid var(--line-strong); border-radius: 12px; padding: 1px 8px; }
 
-/* ---- stage (game player) ---- */
-#stage { margin-top: 12px; }
-#stage iframe {
+/* ---- dedicated game screen ---- */
+#game-stage {
+  position: relative; flex: none;
+  width: min(100%, calc((100vh - 180px) * 4 / 3));
+}
+/* Navbar hides until the corner button toggles it open. */
+/* Collapsible in-game menu: only the whitish toggle shows until opened. */
+#game-navbar {
+  position: absolute; top: 10px; right: 10px; z-index: 5;
+  display: flex; align-items: center; gap: 8px;
+  width: max-content; max-width: calc(100% - 20px);
+  padding: 0; background: transparent;
+  border: 1px solid transparent; border-radius: 999px;
+  color: #fff;
+}
+#game-navbar .nav-items { display: contents; }
+/* :focus-within is scoped to the bar itself — focus in the game iframe must
+   not pin the menu open. */
+#game-stage:not(.open) #game-navbar:not(:focus-within) .nav-items {
+  display: none;
+}
+#game-stage.open #game-navbar,
+#game-navbar:focus-within {
+  background: rgba(17, 17, 17, 0.72);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  border-color: rgba(255, 255, 255, 0.2);
+  padding: 6px 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+#game-nav-title { font-weight: 700; font-size: 13px; white-space: nowrap; }
+#game-navbar #game-live { color: #cfcfcf; }
+#game-navbar .ghost { border-color: rgba(255, 255, 255, 0.3); color: #fff; height: 32px; padding: 0 12px; display: inline-flex; align-items: center; }
+#game-navbar .ghost:hover { border-color: #fff; }
+#game-back { border-radius: 50% !important; width: 32px; height: 32px; padding: 0 0 3px 11px !important; display: grid; place-items: center; font-size: 18px; line-height: 1; }
+#game-quit { border-radius: 999px !important; }
+/* Navbar is click-driven (corner button toggles .open); :focus-within keeps it
+   visible for keyboard users tabbing through. No :hover or opacity tricks —
+   those caused hover on/off flicker loops. */
+#game-nav-toggle {
+  flex: none; width: 32px; height: 32px; padding: 0;
+  display: grid; place-items: center;
+  /* Whitish circle, dark icon: distinct against the dark pill. */
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 50%;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+#game-nav-toggle:hover { transform: scale(1.06); }
+#game-nav-toggle .ic svg, #game-nav-toggle .ic img { width: 20px; height: 20px; }
+/* Game view: the frame hugs a 4:3 box fitted to the viewport — no moat. */
+#view-game { height: 100%; display: flex; flex-direction: column; align-items: center; }
+/* display:flex above overrides the hidden attribute — hide the player when
+   another view (e.g. the dashboard grid) is active. */
+#view-game[hidden] { display: none; }
+#game-stage #game-frame {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  height: auto;
+}
+#game-nav-title { font-weight: 800; font-size: 14px; white-space: nowrap; }
+#game-live { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-spacer { flex: 1; }
+#game-quit { white-space: nowrap; }
+#game-frame {
   display: block;
   width: 100%;
-  /* Player always fits inside the viewport; the game scales to match. */
-  height: clamp(340px, calc(100vh - 330px), 660px);
+  height: 640px;
   border: 1px solid var(--line-strong);
   border-radius: 12px; background: #000;
   overflow: hidden;
   overscroll-behavior: none;
 }
-#live { font-size: 12px; color: var(--muted); min-height: 18px; }
 
 /* ---- collapsible cards ---- */
 .collapse-card { padding: 0; overflow: hidden; }
@@ -505,6 +582,37 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
 .modal-titles h3 { margin: 0 0 6px; font-size: 18px; }
 #modal-close { flex: none; }
 .modal-desc { font-size: 14px; line-height: 1.5; margin: 0 0 8px; }
+
+/* ---- best-scores horizontal bar plot ---- */
+.bar-list { display: flex; flex-direction: column; gap: 10px; }
+.bar-row { display: flex; align-items: center; gap: 10px; }
+.bar-label {
+  flex: none; width: 170px;
+  font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bar-track {
+  flex: 1; height: 18px;
+  background: rgba(0, 0, 0, 0.07);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px; overflow: hidden;
+}
+.bar-fill {
+  height: 100%; border-radius: 10px;
+  background: linear-gradient(90deg, #555, var(--ink));
+  transition: width 0.6s ease;
+}
+.bar-value {
+  flex: none; min-width: 36px; text-align: right;
+  font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+
+/* ---- right-rail game info panel ---- */
+.info-head { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+.info-titles { flex: 1; min-width: 0; }
+.info-titles b { display: block; font-size: 15px; margin-bottom: 4px; }
+#info-play { flex: 1; }
+#info-tab { flex: none; }
 .modal-small { width: min(360px, 100%); }
 .modal-small input { width: 100%; }
 #auth-title { margin: 0 0 8px; }
@@ -522,6 +630,7 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
 @media (max-width: 1100px) {
   #rightbar {
     position: fixed; z-index: 60; top: 0; bottom: 0; right: 0;
+    border-radius: 0;
     width: min(320px, 85vw); padding: 16px; overflow-y: auto;
     background: rgba(255, 255, 255, 0.75);
     -webkit-backdrop-filter: blur(22px) saturate(1.25);
@@ -532,9 +641,17 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
   }
   body.right-collapsed #rightbar { display: block; transform: translateX(105%); }
 }
+/* Accessibility standard: honor reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
 @media (max-width: 900px) {
   #sidebar {
     position: fixed; z-index: 60; top: 0; bottom: 0; left: 0;
+    border-radius: 0;
     width: min(320px, 85vw); padding: 16px; overflow-y: auto;
     background: rgba(255, 255, 255, 0.75);
     -webkit-backdrop-filter: blur(22px) saturate(1.25);

@@ -6,8 +6,6 @@ import type { GameService } from "./registry";
 
 export interface DashboardHandlers {
   onPlay: (service: GameService) => void;
-  onOpenTab: (service: GameService) => void;
-  onDetails: (service: GameService) => void;
 }
 
 /** Case-insensitive search across name, genre and description. */
@@ -24,7 +22,6 @@ export function filterServices(
 
 export interface GameCard {
   root: HTMLElement;
-  setOnline: (online: boolean) => void;
   setBest: (highScore: number | null, plays: number) => void;
 }
 
@@ -44,10 +41,6 @@ export function createGameCard(
   );
   root.style.setProperty("--tile-accent", service.accent);
 
-  const dot = document.createElement("span");
-  dot.className = "dot tile-status";
-  dot.title = "Probing service…";
-
   const icon = document.createElement("img");
   icon.className = "tile-icon";
   icon.src = service.icon;
@@ -62,33 +55,8 @@ export function createGameCard(
   best.className = "tile-best";
   best.textContent = "";
 
-  const actions = document.createElement("div");
-  actions.className = "tile-actions";
-
-  // Info button: opens the full description in an exterior popup window.
-  const info = document.createElement("button");
-  info.className = "ghost tile-mini";
-  info.textContent = "ⓘ";
-  info.title = `About ${service.name} — details popup`;
-  info.setAttribute("aria-label", `About ${service.name}`);
-  info.onclick = (e) => {
-    e.stopPropagation();
-    handlers.onDetails(service);
-  };
-
-  const tab = document.createElement("button");
-  tab.className = "ghost tile-mini";
-  tab.textContent = "↗";
-  tab.title = `Open ${service.name} in a new tab`;
-  tab.setAttribute("aria-label", `Open ${service.name} in a new tab`);
-  tab.onclick = (e) => {
-    e.stopPropagation();
-    handlers.onOpenTab(service);
-  };
-  actions.append(info, tab);
-
   // Hover / focus overlay: short navigate hint only.
-  // The full description lives in the exterior popup (ⓘ button).
+  // Details live in the right-rail Game Info panel + ••• menus.
   const hover = document.createElement("div");
   hover.className = "tile-hover";
   const hoverCta = document.createElement("strong");
@@ -97,7 +65,7 @@ export function createGameCard(
     : "▶ Click to play";
   hover.append(hoverCta);
 
-  root.append(dot, icon, name, best, actions, hover);
+  root.append(icon, name, best, hover);
 
   const play = () => handlers.onPlay(service);
   root.addEventListener("click", play);
@@ -112,13 +80,6 @@ export function createGameCard(
 
   return {
     root,
-    setOnline: (online: boolean) => {
-      dot.classList.toggle("on", online);
-      dot.classList.toggle("off", !online);
-      dot.title = online
-        ? `Online at ${service.devUrl}`
-        : "Offline — run npm run dev in Manager to start it";
-    },
     setBest: (highScore: number | null, plays: number) => {
       best.textContent =
         highScore !== null && plays > 0 ? `★ ${highScore}` : "★ new";
