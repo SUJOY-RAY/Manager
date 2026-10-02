@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Game Manager Hub</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>🕹️ GAME MANAGER</h1>
+  </header>
+  <main>
+    <section class="card" aria-label="accounts">
+      <h2>ACCOUNTS</h2>
+      <div class="row">
+        <input id="username" type="text" maxlength="24" placeholder="new username…" autocomplete="off" />
+        <button id="create">Create</button>
+      </div>
+      <p class="hint">Simple account creation — each account gets its own Space Shooter progress entry.</p>
+      <div id="accounts"></div>
+    </section>
+
+    <section aria-label="games">
+      <div class="card game-card">
+        <h2>SERVICES</h2>
+        <div id="services"></div>
+      </div>
+      <div id="stage" class="card" hidden>
+        <h2 id="stage-title">NOW PLAYING</h2>
+        <div id="live"></div>
+        <iframe id="game-frame" title="game frame" scrolling="no" allow="autoplay; fullscreen"></iframe>
+        <div class="row" style="margin-top:8px">
+          <button id="open-tab" class="ghost">Open in new tab</button>
+          <button id="close-game" class="ghost">Close</button>
+        </div>
+      </div>
+      <div class="card game-card">
+        <h2>PROGRESS (IndexedDB)</h2>
+        <div id="progress"></div>
+        <ul id="sessions" class="sessions"></ul>
+      </div>
+    </section>
+  </main>
+  <div id="toast" role="status"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

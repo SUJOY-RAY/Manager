@@ -1,0 +1,19 @@
+{
+  "gateway": {
+    "name": "game-manager-hub",
+    "port": 5000,
+    "url": "http://localhost:5000"
+  },
+  "services": [
+    {
+      "id": "space-shooter",
+      "name": "Space Shooter",
+      "description": "Canvas arcade shooter microservice",
+      "kind": "game",
+      "projectDir": "../Space Shooter",
+      "port": 5101,
+      "devUrl": "http://localhost:5101",
+      "protocol": "iframe+postMessage"
+    }
+  ]
+}

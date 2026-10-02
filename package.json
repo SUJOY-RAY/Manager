@@ -1,0 +1,19 @@
+{
+  "name": "game-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Microservices-style game manager hub (IndexedDB + accounts + progress)",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev-all.mjs",
+    "dev:hub": "vite --port 5000 --strictPort",
+    "dev:games": "npm run dev --prefix \"../Space Shooter\" -- --port 5101 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 5000",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  }
+}
