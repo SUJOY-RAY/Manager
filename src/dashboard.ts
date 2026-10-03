@@ -2,7 +2,7 @@
 // same card template — icon image, status, hover-to-explain overlay,
 // click (or Enter) to navigate into the game.
 
-import type { GameService } from "./registry";
+import type { GameService } from "./utils/registry";
 
 export interface DashboardHandlers {
   onPlay: (service: GameService) => void;

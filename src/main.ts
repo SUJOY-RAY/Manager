@@ -1,5 +1,4 @@
-import "./styles.css";
-import { GAME_SERVICES, checkHealth, launchUrl, type GameService } from "./registry";
+import { GAME_SERVICES, checkHealth, launchUrl, type GameService } from "./utils/registry";
 import { createGameCard, filterServices } from "./dashboard";
 import {
   createAccount,
@@ -12,12 +11,13 @@ import {
   listProgressForAccount,
   getProgress,
   type Account,
-} from "./db";
-import { saveRun } from "./storage";
-import { verifyPassword } from "./auth";
+} from "./utils/db";
+
+import { verifyPassword } from "./utils/auth";
 import { makeCollapsibleCard, type CollapsibleCard } from "./cards";
 import { attachHoverPopup, esc, openMenu } from "./popup";
 import { hydrateIcons, icon } from "./icons";
+import { saveRun } from "./utils/storage";
 
 const ACTIVE_KEY = "gm.activeAccountId";
 
@@ -122,7 +122,7 @@ async function refreshAccounts(): Promise<void> {
       }
     };
     name.onclick = () => {
-      const open = detail.hidden;
+      const open = Boolean(detail.hidden);
       detail.hidden = !open;
       name.classList.toggle("open", open);
       if (open) void loadDetail();
@@ -822,6 +822,8 @@ async function refreshProgress(): Promise<void> {
   sess.innerHTML = "";
   const account = activeAccount();
   const game = selectedGame();
+  // MY PROGRESS is per-account — hide the whole card when logged out.
+  el("progress-card").hidden = !account;
   progressCard?.setBadge(game.name);
   if (!account) {
     box.innerHTML = `<p class="hint">Create + select an account to see its ${game.name} progress.</p>`;
