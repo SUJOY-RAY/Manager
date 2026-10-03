@@ -285,6 +285,12 @@ button:disabled { opacity: 0.45; cursor: default; }
   border-radius: 12px; padding: 2px 10px; font-weight: 700; font-size: 12px;
 }
 .rec-when { color: var(--muted); font-size: 12px; }
+.rec-top5 { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Personal top-5 leaderboard inside MY PROGRESS. */
+.top5 {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: 4px 0 8px;
+}
 
 /* ---- quick actions + system status ---- */
 .qa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -376,12 +382,12 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
 .game-tile {
   position: relative;
   display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 6px;
+  align-items: center; justify-content: center; gap: 8px;
   aspect-ratio: 1 / 1;
   background: rgba(255, 255, 255, 0.55);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--line-strong);
   border-radius: 12px; padding: 10px 8px;
   cursor: pointer; overflow: hidden;
   transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
@@ -395,19 +401,13 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
   outline: none;
 }
 .tile-icon {
-  width: 72px; height: 72px; flex: none;
+  width: 64px; height: 64px; flex: none;
   border-radius: 14px; pointer-events: none;
-  margin: 4px auto;
+  margin: 2px auto;
+  border: 1px solid var(--line);
 }
 .tile-name { margin: 0; font-size: 13px; text-align: center; color: var(--text); }
-.tile-best { color: var(--muted); font-size: 11px; font-weight: 600; }
-/* Per-game difficulty picker on each dashboard tile. */
-.tile-diff { position: relative; z-index: 2; }
-.tile-diff-select {
-  flex: none; width: auto; max-width: 100%;
-  font-size: 11px; font-weight: 600; padding: 4px 24px 4px 8px;
-  border-radius: 12px; cursor: pointer;
-}
+.tile-best { color: var(--muted); font-size: 11px; font-weight: 600; text-align: center; }
 .diff-pill {
   display: inline-block; min-width: 52px; text-align: center;
   border: 1px solid var(--line-strong); border-radius: 12px;

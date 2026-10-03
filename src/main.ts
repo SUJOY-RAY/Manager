@@ -18,7 +18,9 @@ import {
   listAllProgress,
   listProgressForAccount,
   getProgress,
+  normalizeTopScores,
   type Account,
+  type Progress,
 } from "./utils/db";
 
 import { verifyPassword } from "./utils/auth";
@@ -125,10 +127,12 @@ async function refreshAccounts(): Promise<void> {
         for (const r of sorted) {
           const gameName =
             GAME_SERVICES.find((s) => s.id === r.gameId)?.name ?? r.gameId;
+          const top = normalizeTopScores(r.topScores);
           const line = document.createElement("div");
           line.textContent =
             `${gameName} [${difficultyLabel(r.difficulty)}] — best ${r.highScore} · ` +
-            `${r.totalPlays} play${r.totalPlays === 1 ? "" : "s"}`;
+            `${r.totalPlays} play${r.totalPlays === 1 ? "" : "s"}` +
+            (top.length > 0 ? ` · top 5: ${top.join(" · ")}` : "");
           detail.append(line);
         }
       } catch {
@@ -165,9 +169,16 @@ async function refreshAccounts(): Promise<void> {
     const del = document.createElement("button");
     del.className = "danger";
     del.textContent = "✕";
-    del.title = `Delete ${a.username}`;
+    del.title = a.passHash
+      ? `Delete ${a.username} (password required)`
+      : `Delete ${a.username}`;
     del.onclick = async () => {
       if (!confirm(`Delete account "${a.username}" and its progress?`)) return;
+      // Password-protected accounts must prove ownership before deletion.
+      if (a.passHash) {
+        openAuthModal(a, "delete");
+        return;
+      }
       await deleteAccount(a.id);
       await refreshAll();
       toast(`Account "${a.username}" deleted.`);
@@ -211,32 +222,8 @@ async function refreshServices(): Promise<void> {
   for (const s of services) {
     const card = createGameCard(s, account?.username ?? null, {
       onPlay: (svc) => openInFrame(svc),
-      onDifficulty: (svc, d) => {
-        setGameDifficulty(svc.id, d);
-        if (svc.id === selectedGameId) {
-          selectedDifficulty = d;
-          syncProgressDifficultySelect();
-          void refreshProgress();
-        }
-        // Refresh bests + info panel so the new tier shows immediately.
-        void refreshServices();
-        const info = infoService ?? selectedGame();
-        if (info.id === svc.id) void renderInfoPanel(info);
-        if (currentService?.id === svc.id) openInFrame(svc, { reveal: false });
-      },
-    }, { difficulty: getGameDifficulty(s.id) });
+    });
     box.append(card.root);
-
-    if (account) {
-      const diff = getGameDifficulty(s.id);
-      getProgress(account.id, s.id, diff)
-        .then((p) =>
-          card.setBest(p && p.totalPlays > 0 ? p.highScore : null, p?.totalPlays ?? 0)
-        )
-        .catch(() => card.setBest(null, 0));
-    } else {
-      card.setBest(null, 0);
-    }
   }
   el("games-count").textContent =
     `${services.length} service${services.length === 1 ? "" : "s"}`;
@@ -317,7 +304,7 @@ async function renderAllProgress(): Promise<void> {
   if (sorted.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 6;
+    td.colSpan = 7;
     td.className = "rec-when";
     td.textContent = "No progress on this device yet — play a game to create the first entry.";
     tr.append(td);
@@ -344,12 +331,17 @@ async function renderAllProgress(): Promise<void> {
     pill.className = "score-pill";
     pill.textContent = String(r.highScore);
     best.append(pill);
+    const top5 = document.createElement("td");
+    top5.className = "rec-top5";
+    const tops = normalizeTopScores(r.topScores);
+    top5.textContent = tops.length > 0 ? tops.join(" · ") : "—";
+    top5.title = tops.length > 0 ? `Top 5 runs: ${tops.join(", ")}` : "No runs yet";
     const plays = document.createElement("td");
     plays.textContent = String(r.totalPlays);
     const when = document.createElement("td");
     when.className = "rec-when";
     when.textContent = fmtDate(r.lastPlayedAt);
-    tr.append(acc, gm, df, best, plays, when);
+    tr.append(acc, gm, df, best, top5, plays, when);
     tb.append(tr);
   }
 }
@@ -554,10 +546,18 @@ function syncInfoDifficultySelect(gameId: string): void {
 // ---------- account sign-in (password gate for selecting an account) ----------
 
 let authAccount: Account | null = null;
+let authMode: "select" | "delete" = "select";
 
-function openAuthModal(a: Account): void {
+function openAuthModal(a: Account, mode: "select" | "delete" = "select"): void {
   authAccount = a;
-  el("auth-sub").textContent = `Enter the password for ${a.username} to select this account.`;
+  authMode = mode;
+  el("auth-title").textContent = mode === "delete" ? "🗑 Delete account" : "🔒 Sign in";
+  (el("auth-submit") as HTMLButtonElement).textContent =
+    mode === "delete" ? "Delete" : "Unlock";
+  el("auth-sub").textContent =
+    mode === "delete"
+      ? `Enter the password for ${a.username} to permanently delete it and its progress.`
+      : `Enter the password for ${a.username} to select this account.`;
   (el("auth-password") as HTMLInputElement).value = "";
   el("auth-modal").hidden = false;
   (el("auth-password") as HTMLInputElement).focus();
@@ -566,6 +566,7 @@ function openAuthModal(a: Account): void {
 function closeAuthModal(): void {
   el("auth-modal").hidden = true;
   authAccount = null;
+  authMode = "select";
 }
 
 async function submitAuth(): Promise<void> {
@@ -579,7 +580,14 @@ async function submitAuth(): Promise<void> {
     return;
   }
   const account = authAccount;
+  const mode = authMode;
   closeAuthModal();
+  if (mode === "delete") {
+    await deleteAccount(account.id);
+    await refreshAll();
+    toast(`Account "${account.username}" deleted.`);
+    return;
+  }
   await selectAccount(account);
 }
 
@@ -1017,6 +1025,38 @@ async function refreshProgress(): Promise<void> {
     grid.append(d);
   }
   box.append(grid);
+
+  // Personal top 5 for this game + difficulty.
+  const top5 = normalizeTopScores((prog as Partial<Progress> | undefined)?.topScores);
+  const topWrap = document.createElement("div");
+  topWrap.className = "top5";
+  const topLabel = document.createElement("span");
+  topLabel.className = "hint";
+  topLabel.textContent = `TOP 5 · ${account.username} · ${diffName}`;
+  topLabel.title =
+    `<b>TOP 5 · ${esc(game.name)} [${esc(diffName)}]</b><br>` +
+    `Best 5 runs saved locally for <b>${esc(account.username)}</b>.`;
+  topWrap.append(topLabel);
+  if (top5.length === 0) {
+    const none = document.createElement("span");
+    none.className = "hint";
+    none.textContent = "— no runs yet";
+    topWrap.append(none);
+  } else {
+    for (const s of top5) {
+      const pill = document.createElement("span");
+      pill.className = "score-pill";
+      pill.textContent = String(s);
+      topWrap.append(pill);
+    }
+  }
+  attachHoverPopup(topWrap, () =>
+    top5.length === 0
+      ? `<b>TOP 5 · ${esc(game.name)} [${esc(diffName)}]</b><br>No runs yet.`
+      : `<b>TOP 5 · ${esc(game.name)} [${esc(diffName)}]</b><br>` +
+        top5.map((s, i) => `#${i + 1} — <b>${s}</b>`).join("<br>")
+  );
+  box.append(topWrap);
 
   // All tiers at a glance so every difficulty shows in progress.
   const byDiff = document.createElement("p");

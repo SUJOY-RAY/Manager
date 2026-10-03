@@ -4,6 +4,7 @@
 //   accounts : { id, username, createdAt }            (keyPath: id, unique index on username)
 //   games    : { id, name, description, devUrl }     (keyPath: id)
 //   progress : per (accountId, gameId, difficulty)   (unique index on [accountId+gameId+difficulty])
+//     + topScores: best 5 run scores, desc
 //   sessions : one row per finished run              (indexes on accountId, gameId, difficulty)
 
 import type { Difficulty } from "./difficulty";
@@ -11,8 +12,26 @@ import { parseDifficulty } from "./difficulty";
 
 export const DEFAULT_DIFFICULTY: Difficulty = "normal";
 
+/** Max runs kept on a progress aggregate's leaderboard. */
+export const TOP_SCORES_LIMIT = 5;
+
 export function normalizeDifficulty(value: unknown): Difficulty {
   return parseDifficulty(value);
+}
+
+/** Clean any stored value into a desc-sorted list of up to 5 run scores. */
+export function normalizeTopScores(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    .map((v) => Math.max(0, Math.floor(v)))
+    .sort((a, b) => b - a)
+    .slice(0, TOP_SCORES_LIMIT);
+}
+
+/** Fold a finished run into a top-5 list (duplicates kept: distinct runs). */
+export function mergeTopScores(existing: unknown, score: number): number[] {
+  return normalizeTopScores([...normalizeTopScores(existing), score]);
 }
 
 export interface Account {
@@ -37,6 +56,8 @@ export interface Progress {
   /** Per-game difficulty tier this aggregate covers. Legacy rows read as "normal". */
   difficulty: Difficulty;
   highScore: number;
+  /** Best 5 run scores, desc. Backfilled from sessions for pre-v3 rows. */
+  topScores: number[];
   totalPlays: number;
   totalScore: number;
   lastScore: number;
@@ -55,7 +76,7 @@ export interface GameSession {
 }
 
 const DB_NAME = "game-manager-db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 function makeId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -110,6 +131,40 @@ function openDb(): Promise<IDBDatabase> {
             }
             c.continue();
           }
+        };
+      }
+      // v2 -> v3: progress rows gain topScores (best 5 runs, desc),
+      // backfilled from each row's sessions so no leaderboard is lost.
+      if (db.objectStoreNames.contains("sessions") && oldVersion < 3 && oldVersion > 0) {
+        const t = req.transaction!;
+        const progStore = t.objectStore("progress");
+        const sessStore = t.objectStore("sessions");
+        const getProg = progStore.getAll();
+        getProg.onsuccess = () => {
+          const rows = (getProg.result as Progress[]) ?? [];
+          if (rows.length === 0) return;
+          const getSess = sessStore.getAll();
+          getSess.onsuccess = () => {
+            const sessions = (getSess.result as GameSession[]) ?? [];
+            for (const p of rows) {
+              if (Array.isArray((p as Partial<Progress>).topScores)) continue;
+              const want = normalizeDifficulty((p as Partial<Progress>).difficulty);
+              let top = sessions
+                .filter(
+                  (s) =>
+                    s.accountId === p.accountId &&
+                    s.gameId === p.gameId &&
+                    normalizeDifficulty((s as Partial<GameSession>).difficulty) === want
+                )
+                .map((s) => s.score)
+                .sort((a, b) => b - a)
+                .slice(0, TOP_SCORES_LIMIT);
+              if (top.length === 0 && p.highScore > 0) {
+                top = [Math.max(0, Math.floor(p.highScore))];
+              }
+              progStore.put({ ...p, topScores: top });
+            }
+          };
         };
       }
       if (!db.objectStoreNames.contains("sessions")) {
@@ -295,9 +350,18 @@ function ensureProgressRow(
           normalizeDifficulty((r as Partial<Progress>).difficulty) === difficulty
       );
       if (found) {
-        // Heal legacy rows that predate the difficulty column.
-        if (!(found as Partial<Progress>).difficulty) {
-          const healed: Progress = { ...found, difficulty };
+        // Heal legacy rows that predate the difficulty / topScores columns.
+        const partial = found as Partial<Progress>;
+        if (!partial.difficulty || !Array.isArray(partial.topScores)) {
+          const healed: Progress = {
+            ...found,
+            difficulty,
+            topScores: Array.isArray(partial.topScores)
+              ? normalizeTopScores(partial.topScores)
+              : found.highScore > 0
+                ? [Math.max(0, Math.floor(found.highScore))]
+                : [],
+          };
           try {
             store.put(healed);
           } catch {
@@ -314,6 +378,7 @@ function ensureProgressRow(
         gameId,
         difficulty,
         highScore: 0,
+        topScores: [],
         totalPlays: 0,
         totalScore: 0,
         lastScore: 0,
@@ -374,6 +439,7 @@ export async function listProgressForAccount(accountId: string): Promise<Progres
       .map((r) => ({
         ...r,
         difficulty: normalizeDifficulty((r as Partial<Progress>).difficulty),
+        topScores: normalizeTopScores((r as Partial<Progress>).topScores),
       }));
   } finally {
     db.close();
@@ -396,6 +462,7 @@ export async function recordGameResult(
       ...progress,
       difficulty,
       highScore: Math.max(progress.highScore, clean),
+      topScores: mergeTopScores((progress as Partial<Progress>).topScores, clean),
       totalPlays: progress.totalPlays + 1,
       totalScore: progress.totalScore + clean,
       lastScore: clean,
@@ -460,6 +527,7 @@ export async function listAllProgress(): Promise<Progress[]> {
     return all.map((r) => ({
       ...r,
       difficulty: normalizeDifficulty((r as Partial<Progress>).difficulty),
+      topScores: normalizeTopScores((r as Partial<Progress>).topScores),
     }));
   } finally {
     db.close();
