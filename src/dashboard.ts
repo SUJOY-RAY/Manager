@@ -3,9 +3,19 @@
 // click (or Enter) to navigate into the game.
 
 import type { GameService } from "./utils/registry";
+import {
+  DIFFICULTIES,
+  difficultyLabel,
+  type Difficulty,
+} from "./utils/difficulty";
 
 export interface DashboardHandlers {
   onPlay: (service: GameService) => void;
+  onDifficulty?: (service: GameService, difficulty: Difficulty) => void;
+}
+
+export interface DashboardOptions {
+  difficulty?: Difficulty;
 }
 
 /** Case-insensitive search across name, genre and description. */
@@ -29,7 +39,8 @@ export interface GameCard {
 export function createGameCard(
   service: GameService,
   accountName: string | null,
-  handlers: DashboardHandlers
+  handlers: DashboardHandlers,
+  opts?: DashboardOptions
 ): GameCard {
   const root = document.createElement("article");
   root.className = "game-tile";
@@ -55,6 +66,29 @@ export function createGameCard(
   best.className = "tile-best";
   best.textContent = "";
 
+  // Per-game difficulty picker. Clicks/keys here must not launch the game.
+  const diffWrap = document.createElement("label");
+  diffWrap.className = "tile-diff";
+  const diffSelect = document.createElement("select");
+  diffSelect.className = "tile-diff-select";
+  diffSelect.setAttribute("aria-label", `Difficulty for ${service.name}`);
+  diffSelect.title = `Difficulty for ${service.name}`;
+  for (const d of DIFFICULTIES) {
+    const opt = document.createElement("option");
+    opt.value = d;
+    opt.textContent = difficultyLabel(d);
+    diffSelect.append(opt);
+  }
+  diffSelect.value = opts?.difficulty ?? "normal";
+  diffSelect.addEventListener("click", (e) => e.stopPropagation());
+  diffSelect.addEventListener("pointerdown", (e) => e.stopPropagation());
+  diffSelect.addEventListener("keydown", (e) => e.stopPropagation());
+  diffSelect.addEventListener("change", (e) => {
+    e.stopPropagation();
+    handlers.onDifficulty?.(service, diffSelect.value as Difficulty);
+  });
+  diffWrap.append(diffSelect);
+
   // Hover / focus overlay: short navigate hint only.
   // Details live in the right-rail Game Info panel + ••• menus.
   const hover = document.createElement("div");
@@ -65,14 +99,19 @@ export function createGameCard(
     : "▶ Click to play";
   hover.append(hoverCta);
 
-  root.append(icon, name, best, hover);
+  root.append(icon, name, best, diffWrap, hover);
 
   const play = () => handlers.onPlay(service);
-  root.addEventListener("click", play);
+  root.addEventListener("click", (e) => {
+    // The difficulty select lives inside the tile — don't launch from it.
+    if ((e.target as HTMLElement).closest(".tile-diff")) return;
+    play();
+  });
   root.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target === root) play();
+    if (e.target !== root) return;
+    if (e.key === "Enter") play();
     // Space on a focused card also launches (button-like), without scrolling.
-    if (e.key === " " && e.target === root) {
+    if (e.key === " ") {
       e.preventDefault();
       play();
     }
@@ -81,12 +120,13 @@ export function createGameCard(
   return {
     root,
     setBest: (highScore: number | null, plays: number) => {
+      const diff = difficultyLabel(diffSelect.value as Difficulty);
       best.textContent =
-        highScore !== null && plays > 0 ? `★ ${highScore}` : "★ new";
+        highScore !== null && plays > 0 ? `★ ${highScore} · ${diff}` : `★ new · ${diff}`;
       best.title =
         plays > 0
-          ? `Best score over ${plays} run${plays === 1 ? "" : "s"}`
-          : "No runs yet for this account";
+          ? `Best score on ${diff} over ${plays} run${plays === 1 ? "" : "s"}`
+          : `No ${diff} runs yet for this account`;
     },
   };
 }

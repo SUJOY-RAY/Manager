@@ -3,8 +3,17 @@
 // DB: game-manager-db
 //   accounts : { id, username, createdAt }            (keyPath: id, unique index on username)
 //   games    : { id, name, description, devUrl }     (keyPath: id)
-//   progress : per (accountId, gameId) aggregates    (unique index on [accountId+gameId])
-//   sessions : one row per finished run              (indexes on accountId, gameId)
+//   progress : per (accountId, gameId, difficulty)   (unique index on [accountId+gameId+difficulty])
+//   sessions : one row per finished run              (indexes on accountId, gameId, difficulty)
+
+import type { Difficulty } from "./difficulty";
+import { parseDifficulty } from "./difficulty";
+
+export const DEFAULT_DIFFICULTY: Difficulty = "normal";
+
+export function normalizeDifficulty(value: unknown): Difficulty {
+  return parseDifficulty(value);
+}
 
 export interface Account {
   id: string;
@@ -25,6 +34,8 @@ export interface Progress {
   id?: number;
   accountId: string;
   gameId: string;
+  /** Per-game difficulty tier this aggregate covers. Legacy rows read as "normal". */
+  difficulty: Difficulty;
   highScore: number;
   totalPlays: number;
   totalScore: number;
@@ -37,12 +48,14 @@ export interface GameSession {
   id?: number;
   accountId: string;
   gameId: string;
+  /** Difficulty the run was played on. Legacy rows read as "normal". */
+  difficulty: Difficulty;
   score: number;
   playedAt: number;
 }
 
 const DB_NAME = "game-manager-db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function makeId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -54,8 +67,9 @@ function makeId(prefix: string): string {
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (ev) => {
       const db = req.result;
+      const oldVersion = (ev as IDBVersionChangeEvent).oldVersion;
       if (!db.objectStoreNames.contains("accounts")) {
         const s = db.createObjectStore("accounts", { keyPath: "id" });
         s.createIndex("by-username", "username", { unique: true });
@@ -68,11 +82,35 @@ function openDb(): Promise<IDBDatabase> {
           keyPath: "id",
           autoIncrement: true,
         });
-        s.createIndex("by-account-game", ["accountId", "gameId"], {
+        s.createIndex("by-account-game-difficulty", ["accountId", "gameId", "difficulty"], {
           unique: true,
         });
         s.createIndex("by-account", "accountId", { unique: false });
         s.createIndex("by-game", "gameId", { unique: false });
+      } else if (oldVersion < 2) {
+        // v1 -> v2: progress was unique on [accountId+gameId]; it is now
+        // unique on [accountId+gameId+difficulty]. Legacy rows backfill to "normal".
+        const t = req.transaction!;
+        const s = t.objectStore("progress");
+        if (s.indexNames.contains("by-account-game")) {
+          s.deleteIndex("by-account-game");
+        }
+        if (!s.indexNames.contains("by-account-game-difficulty")) {
+          s.createIndex("by-account-game-difficulty", ["accountId", "gameId", "difficulty"], {
+            unique: true,
+          });
+        }
+        const cursor = s.openCursor();
+        cursor.onsuccess = () => {
+          const c = cursor.result;
+          if (c) {
+            const v = c.value as Partial<Progress>;
+            if (!v.difficulty) {
+              c.update({ ...v, difficulty: DEFAULT_DIFFICULTY });
+            }
+            c.continue();
+          }
+        };
       }
       if (!db.objectStoreNames.contains("sessions")) {
         const s = db.createObjectStore("sessions", {
@@ -82,6 +120,20 @@ function openDb(): Promise<IDBDatabase> {
         s.createIndex("by-account", "accountId", { unique: false });
         s.createIndex("by-game", "gameId", { unique: false });
         s.createIndex("by-played", "playedAt", { unique: false });
+      } else if (oldVersion < 2) {
+        const t = req.transaction!;
+        const s = t.objectStore("sessions");
+        const cursor = s.openCursor();
+        cursor.onsuccess = () => {
+          const c = cursor.result;
+          if (c) {
+            const v = c.value as Partial<GameSession>;
+            if (!v.difficulty) {
+              c.update({ ...v, difficulty: DEFAULT_DIFFICULTY });
+            }
+            c.continue();
+          }
+        };
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -143,8 +195,10 @@ export async function createAccount(
     await tx(db, ["accounts"], "readwrite", (t) =>
       t.objectStore("accounts").add(account)
     );
-    // Every new account gets a fresh Space Shooter progress entry.
-    await ensureProgressRow(db, account.id, "space-shooter");
+    // Every new account gets fresh progress entries (all difficulties).
+    await ensureProgressRow(db, account.id, "space-shooter", "easy");
+    await ensureProgressRow(db, account.id, "space-shooter", "normal");
+    await ensureProgressRow(db, account.id, "space-shooter", "hard");
     return account;
   } finally {
     db.close();
@@ -219,27 +273,46 @@ export async function listGames(): Promise<GameRecord[]> {
   }
 }
 
-// ---- progress ----
+// ---- progress (per account × game × difficulty) ----
 
 function ensureProgressRow(
   db: IDBDatabase,
   accountId: string,
-  gameId: string
+  gameId: string,
+  difficultyInput: unknown = DEFAULT_DIFFICULTY
 ): Promise<Progress> {
+  const difficulty = normalizeDifficulty(difficultyInput);
   return new Promise((resolve, reject) => {
     const t = db.transaction(["progress"], "readwrite");
     const store = t.objectStore("progress");
-    const idx = store.index("by-account-game");
-    const get = idx.get([accountId, gameId]);
-    get.onsuccess = () => {
-      const found = get.result as Progress | undefined;
+    const getAllReq = store.getAll();
+    getAllReq.onsuccess = () => {
+      const rows = (getAllReq.result as Progress[]) ?? [];
+      const found = rows.find(
+        (r) =>
+          r.accountId === accountId &&
+          r.gameId === gameId &&
+          normalizeDifficulty((r as Partial<Progress>).difficulty) === difficulty
+      );
       if (found) {
-        resolve(found);
+        // Heal legacy rows that predate the difficulty column.
+        if (!(found as Partial<Progress>).difficulty) {
+          const healed: Progress = { ...found, difficulty };
+          try {
+            store.put(healed);
+          } catch {
+            /* healed on next write */
+          }
+          resolve(healed);
+        } else {
+          resolve(found);
+        }
         return;
       }
       const fresh: Progress = {
         accountId,
         gameId,
+        difficulty,
         highScore: 0,
         totalPlays: 0,
         totalScore: 0,
@@ -251,17 +324,18 @@ function ensureProgressRow(
       add.onsuccess = () => resolve({ ...fresh, id: add.result as number });
       add.onerror = () => reject(add.error);
     };
-    get.onerror = () => reject(get.error);
+    getAllReq.onerror = () => reject(getAllReq.error);
   });
 }
 
 export async function ensureProgress(
   accountId: string,
-  gameId: string
+  gameId: string,
+  difficulty: Difficulty = DEFAULT_DIFFICULTY
 ): Promise<Progress> {
   const db = await openDb();
   try {
-    return await ensureProgressRow(db, accountId, gameId);
+    return await ensureProgressRow(db, accountId, gameId, difficulty);
   } finally {
     db.close();
   }
@@ -269,17 +343,22 @@ export async function ensureProgress(
 
 export async function getProgress(
   accountId: string,
-  gameId: string
+  gameId: string,
+  difficulty: Difficulty = DEFAULT_DIFFICULTY
 ): Promise<Progress | null> {
   const db = await openDb();
   try {
-    const row = await tx<Progress | undefined>(
-      db,
-      ["progress"],
-      "readonly",
-      (t) => t.objectStore("progress").index("by-account-game").get([accountId, gameId])
+    const t = db.transaction(["progress"], "readonly");
+    const all = await getAll<Progress>(t.objectStore("progress"));
+    const want = normalizeDifficulty(difficulty);
+    return (
+      all.find(
+        (r) =>
+          r.accountId === accountId &&
+          r.gameId === gameId &&
+          normalizeDifficulty((r as Partial<Progress>).difficulty) === want
+      ) ?? null
     );
-    return row ?? null;
   } finally {
     db.close();
   }
@@ -288,26 +367,34 @@ export async function getProgress(
 export async function listProgressForAccount(accountId: string): Promise<Progress[]> {
   const db = await openDb();
   try {
-    return await tx<Progress[]>(db, ["progress"], "readonly", (t) =>
-      t.objectStore("progress").index("by-account").getAll(accountId) as unknown as IDBRequest<Progress[]>
-    );
+    const t = db.transaction(["progress"], "readonly");
+    const all = await getAll<Progress>(t.objectStore("progress"));
+    return all
+      .filter((r) => r.accountId === accountId)
+      .map((r) => ({
+        ...r,
+        difficulty: normalizeDifficulty((r as Partial<Progress>).difficulty),
+      }));
   } finally {
     db.close();
   }
 }
 
-/** Record a finished run: upserts the aggregate + appends a session row. */
+/** Record a finished run: upserts the per-difficulty aggregate + appends a session row. */
 export async function recordGameResult(
   accountId: string,
   gameId: string,
-  score: number
+  score: number,
+  difficultyInput: unknown = DEFAULT_DIFFICULTY
 ): Promise<{ progress: Progress; session: GameSession }> {
   const clean = Math.max(0, Math.floor(score));
+  const difficulty = normalizeDifficulty(difficultyInput);
   const db = await openDb();
   try {
-    const progress = await ensureProgressRow(db, accountId, gameId);
+    const progress = await ensureProgressRow(db, accountId, gameId, difficulty);
     const next: Progress = {
       ...progress,
+      difficulty,
       highScore: Math.max(progress.highScore, clean),
       totalPlays: progress.totalPlays + 1,
       totalScore: progress.totalScore + clean,
@@ -318,6 +405,7 @@ export async function recordGameResult(
     const session: GameSession = {
       accountId,
       gameId,
+      difficulty,
       score: clean,
       playedAt: Date.now(),
     };
@@ -337,14 +425,25 @@ export async function recordGameResult(
 export async function listSessions(
   accountId: string,
   gameId: string,
-  limit = 10
+  limit = 10,
+  difficulty?: Difficulty
 ): Promise<GameSession[]> {
   const db = await openDb();
   try {
     const t = db.transaction(["sessions"], "readonly");
     const all = await getAll<GameSession>(t.objectStore("sessions"));
+    const want = difficulty === undefined ? undefined : normalizeDifficulty(difficulty);
     return all
       .filter((s) => s.accountId === accountId && s.gameId === gameId)
+      .filter((s) =>
+        want === undefined
+          ? true
+          : normalizeDifficulty((s as Partial<GameSession>).difficulty) === want
+      )
+      .map((s) => ({
+        ...s,
+        difficulty: normalizeDifficulty((s as Partial<GameSession>).difficulty),
+      }))
       .sort((a, b) => b.playedAt - a.playedAt)
       .slice(0, limit);
   } finally {
@@ -352,12 +451,16 @@ export async function listSessions(
   }
 }
 
-/** Every progress row on this device (all accounts × games). */
+/** Every progress row on this device (all accounts × games × difficulties). */
 export async function listAllProgress(): Promise<Progress[]> {
   const db = await openDb();
   try {
     const t = db.transaction(["progress"], "readonly");
-    return await getAll<Progress>(t.objectStore("progress"));
+    const all = await getAll<Progress>(t.objectStore("progress"));
+    return all.map((r) => ({
+      ...r,
+      difficulty: normalizeDifficulty((r as Partial<Progress>).difficulty),
+    }));
   } finally {
     db.close();
   }

@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Game Manager Hub</title>
-  <script type="module" crossorigin src="/assets/index-B9mr5TSz.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BhZYMPS5.css">
+  <script type="module" crossorigin src="/assets/index-_ZgwCAf9.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CKz0mj4y.css">
 </head>
 <body>
   <!-- Central parent container: everything in the hub renders through
@@ -58,6 +58,7 @@
           <span class="nav-items">
             <button id="game-back" class="ghost icon-btn" aria-label="Back to dashboard" title="Back to dashboard">‹</button>
             <span id="game-nav-title">NOW PLAYING</span>
+            <select id="game-difficulty" aria-label="Game difficulty" title="Game difficulty"></select>
             <span id="game-live" class="hint"></span>
             <span class="nav-spacer"></span>
             <button id="open-tab" class="ghost" title="Open in new tab">↗</button>
@@ -99,7 +100,7 @@
       <div class="card game-card">
         <div class="panel-head"><h2>ALL ACCOUNTS</h2></div>
         <table class="rec-table">
-          <thead><tr><th>Account</th><th>Game</th><th>Best</th><th>Plays</th><th>Last Played</th></tr></thead>
+          <thead><tr><th>Account</th><th>Game</th><th>Difficulty</th><th>Best</th><th>Plays</th><th>Last Played</th></tr></thead>
           <tbody id="all-progress-tbody"></tbody>
         </table>
       </div>
@@ -107,6 +108,7 @@
         <h2 id="progress-title">MY PROGRESS</h2>
         <div class="row" style="margin-bottom:12px">
           <select id="progress-game" aria-label="Select game to view progress"></select>
+          <select id="progress-difficulty" aria-label="Select difficulty to view progress"></select>
         </div>
         <div id="progress"></div>
         <ul id="sessions" class="sessions"></ul>
@@ -129,6 +131,9 @@
         </div>
         <p id="info-desc" class="modal-desc"></p>
         <p id="info-controls" class="hint"></p>
+        <div class="row" style="margin-bottom:8px">
+          <select id="info-difficulty" aria-label="Game difficulty"></select>
+        </div>
         <div class="row">
           <button id="info-play">▶ Play</button>
           <button id="info-tab" class="ghost">↗</button>

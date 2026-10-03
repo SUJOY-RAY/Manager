@@ -1,6 +1,14 @@
 import { GAME_SERVICES, checkHealth, launchUrl, type GameService } from "./utils/registry";
 import { createGameCard, filterServices } from "./dashboard";
 import {
+  DIFFICULTIES,
+  difficultyLabel,
+  getGameDifficulty,
+  parseDifficulty,
+  setGameDifficulty,
+  type Difficulty,
+} from "./utils/difficulty";
+import {
   createAccount,
   deleteAccount,
   ensureGameSeed,
@@ -38,7 +46,9 @@ function selectedGame(): GameService {
 }
 
 async function ensureAllProgress(accountId: string): Promise<void> {
-  for (const s of GAME_SERVICES) await ensureProgress(accountId, s.id);
+  for (const s of GAME_SERVICES) {
+    for (const d of DIFFICULTIES) await ensureProgress(accountId, s.id, d);
+  }
 }
 
 function toast(msg: string): void {
@@ -108,12 +118,16 @@ async function refreshAccounts(): Promise<void> {
           return;
         }
         detail.innerHTML = "";
-        for (const r of rows) {
+        const sorted = [...rows].sort((x, y) =>
+          x.gameId.localeCompare(y.gameId) ||
+          DIFFICULTIES.indexOf(x.difficulty) - DIFFICULTIES.indexOf(y.difficulty)
+        );
+        for (const r of sorted) {
           const gameName =
             GAME_SERVICES.find((s) => s.id === r.gameId)?.name ?? r.gameId;
           const line = document.createElement("div");
           line.textContent =
-            `${gameName} — best ${r.highScore} · ` +
+            `${gameName} [${difficultyLabel(r.difficulty)}] — best ${r.highScore} · ` +
             `${r.totalPlays} play${r.totalPlays === 1 ? "" : "s"}`;
           detail.append(line);
         }
@@ -197,11 +211,25 @@ async function refreshServices(): Promise<void> {
   for (const s of services) {
     const card = createGameCard(s, account?.username ?? null, {
       onPlay: (svc) => openInFrame(svc),
-    });
+      onDifficulty: (svc, d) => {
+        setGameDifficulty(svc.id, d);
+        if (svc.id === selectedGameId) {
+          selectedDifficulty = d;
+          syncProgressDifficultySelect();
+          void refreshProgress();
+        }
+        // Refresh bests + info panel so the new tier shows immediately.
+        void refreshServices();
+        const info = infoService ?? selectedGame();
+        if (info.id === svc.id) void renderInfoPanel(info);
+        if (currentService?.id === svc.id) openInFrame(svc, { reveal: false });
+      },
+    }, { difficulty: getGameDifficulty(s.id) });
     box.append(card.root);
 
     if (account) {
-      getProgress(account.id, s.id)
+      const diff = getGameDifficulty(s.id);
+      getProgress(account.id, s.id, diff)
         .then((p) =>
           card.setBest(p && p.totalPlays > 0 ? p.highScore : null, p?.totalPlays ?? 0)
         )
@@ -238,7 +266,7 @@ async function renderBestBars(): Promise<void> {
     row.className = "bar-row";
     const label = document.createElement("span");
     label.className = "bar-label";
-    label.textContent = `${byName.get(r.accountId) ?? "deleted"} · ${gameNameOf(r.gameId)}`;
+    label.textContent = `${byName.get(r.accountId) ?? "deleted"} · ${gameNameOf(r.gameId)} [${difficultyLabel(r.difficulty)}]`;
     label.title = label.textContent;
     const track = document.createElement("div");
     track.className = "bar-track";
@@ -280,12 +308,16 @@ async function renderAllProgress(): Promise<void> {
   const sorted = [...rows].sort((a, b) => {
     const an = byName.get(a.accountId) ?? "";
     const bn = byName.get(b.accountId) ?? "";
-    return an.localeCompare(bn) || a.gameId.localeCompare(b.gameId);
+    return (
+      an.localeCompare(bn) ||
+      a.gameId.localeCompare(b.gameId) ||
+      DIFFICULTIES.indexOf(a.difficulty) - DIFFICULTIES.indexOf(b.difficulty)
+    );
   });
   if (sorted.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 5;
+    td.colSpan = 6;
     td.className = "rec-when";
     td.textContent = "No progress on this device yet — play a game to create the first entry.";
     tr.append(td);
@@ -302,6 +334,11 @@ async function renderAllProgress(): Promise<void> {
     }
     const gm = document.createElement("td");
     gm.textContent = gameNameOf(r.gameId);
+    const df = document.createElement("td");
+    const dpill = document.createElement("span");
+    dpill.className = `diff-pill diff-${r.difficulty}`;
+    dpill.textContent = difficultyLabel(r.difficulty);
+    df.append(dpill);
     const best = document.createElement("td");
     const pill = document.createElement("span");
     pill.className = "score-pill";
@@ -312,7 +349,7 @@ async function renderAllProgress(): Promise<void> {
     const when = document.createElement("td");
     when.className = "rec-when";
     when.textContent = fmtDate(r.lastPlayedAt);
-    tr.append(acc, gm, best, plays, when);
+    tr.append(acc, gm, df, best, plays, when);
     tb.append(tr);
   }
 }
@@ -347,14 +384,20 @@ async function renderServicesMenu(): Promise<void> {
       openMenu(kebab, [
         {
           icon: icon("play"),
-          label: account ? `Play as ${account.username}` : "Play here",
+          label: account
+            ? `Play as ${account.username} [${difficultyLabel(getGameDifficulty(s.id))}]`
+            : `Play here [${difficultyLabel(getGameDifficulty(s.id))}]`,
           onSelect: () => openInFrame(s),
         },
         {
           icon: icon("external"),
           label: "Open in new tab",
           onSelect: () =>
-            window.open(launchUrl(s, activeAccount()), "_blank", "noopener"),
+            window.open(
+              launchUrl(s, activeAccount(), getGameDifficulty(s.id)),
+              "_blank",
+              "noopener"
+            ),
         },
         { icon: icon("info"), label: "Details", onSelect: () => void renderInfoPanel(s, true) },
       ]);
@@ -381,23 +424,27 @@ async function renderTopbar(): Promise<void> {
     ? account.username.slice(0, 2).toUpperCase()
     : "–";
   el("avatar-name").textContent = account?.username ?? "Guest";
-  // Badge = games where another account holds a greater best than you.
+  // Badge = (game × difficulty) pairs where another account leads you.
   const badge = el("bell-badge");
   let surpassed = 0;
   if (account) {
     const rows = await listAllProgress().catch(() => []);
     for (const s of GAME_SERVICES) {
-      const mine = rows.find(
-        (r) => r.accountId === account.id && r.gameId === s.id
-      );
-      if (!mine || mine.totalPlays === 0) continue;
-      const bestOfRest = Math.max(
-        0,
-        ...rows
-          .filter((r) => r.accountId !== account.id && r.gameId === s.id)
-          .map((r) => r.highScore)
-      );
-      if (bestOfRest > mine.highScore) surpassed++;
+      for (const d of DIFFICULTIES) {
+        const mine = rows.find(
+          (r) => r.accountId === account.id && r.gameId === s.id && r.difficulty === d
+        );
+        if (!mine || mine.totalPlays === 0) continue;
+        const bestOfRest = Math.max(
+          0,
+          ...rows
+            .filter(
+              (r) => r.accountId !== account.id && r.gameId === s.id && r.difficulty === d
+            )
+            .map((r) => r.highScore)
+        );
+        if (bestOfRest > mine.highScore) surpassed++;
+      }
     }
   }
   badge.textContent = surpassed > 0 ? String(surpassed) : "";
@@ -419,14 +466,16 @@ let infoService: GameService | null = null;
 async function renderInfoPanel(service: GameService, reveal = false): Promise<void> {
   infoService = service;
   const account = activeAccount();
+  const difficulty = getGameDifficulty(service.id);
   (el("info-icon") as HTMLImageElement).src = service.icon;
   el("info-name").textContent = service.name;
   el("info-genre").textContent = service.genre;
   el("info-desc").textContent = `${service.description} ${service.blurb}`;
   el("info-controls").textContent = `Controls: ${service.controls}.`;
   (el("info-play") as HTMLButtonElement).textContent = account
-    ? `▶ Play as ${account.username}`
-    : "▶ Play";
+    ? `▶ Play as ${account.username} [${difficultyLabel(difficulty)}]`
+    : `▶ Play [${difficultyLabel(difficulty)}]`;
+  syncInfoDifficultySelect(service.id);
 
   const dot = el("info-dot");
   dot.className = "dot";
@@ -446,10 +495,12 @@ async function renderInfoPanel(service: GameService, reveal = false): Promise<vo
   const best = el("info-best");
   best.textContent = "";
   if (account) {
-    const p = await getProgress(account.id, service.id).catch(() => null);
+    const p = await getProgress(account.id, service.id, difficulty).catch(() => null);
     if (infoService?.id !== service.id) return;
     best.textContent =
-      p && p.totalPlays > 0 ? `★ best ${p.highScore}` : "★ no runs yet";
+      p && p.totalPlays > 0
+        ? `★ best ${p.highScore} [${difficultyLabel(difficulty)}]`
+        : `★ no ${difficultyLabel(difficulty).toLowerCase()} runs yet`;
   }
 
   if (reveal) {
@@ -465,8 +516,38 @@ function wireInfoPanel(): void {
   };
   el("info-tab").onclick = () => {
     if (infoService)
-      window.open(launchUrl(infoService, activeAccount()), "_blank", "noopener");
+      window.open(
+        launchUrl(infoService, activeAccount(), getGameDifficulty(infoService.id)),
+        "_blank",
+        "noopener"
+      );
   };
+  (el("info-difficulty") as HTMLSelectElement).addEventListener("change", (e) => {
+    if (!infoService) return;
+    const d = parseDifficulty((e.target as HTMLSelectElement).value);
+    setGameDifficulty(infoService.id, d);
+    void refreshServices();
+    void renderInfoPanel(infoService);
+    syncGameDifficultySelect();
+    if (currentService?.id === infoService.id) {
+      openInFrame(infoService, { reveal: false });
+    }
+  });
+}
+
+function syncInfoDifficultySelect(gameId: string): void {
+  const sel = el("info-difficulty") as HTMLSelectElement | null;
+  if (!sel) return;
+  if (sel.options.length === 0) {
+    for (const d of DIFFICULTIES) {
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = difficultyLabel(d);
+      sel.append(opt);
+    }
+  }
+  const want = getGameDifficulty(gameId);
+  if (sel.value !== want) sel.value = want;
 }
 
 // (Web save removed for now — everything persists locally via IndexedDB.)
@@ -670,11 +751,14 @@ function openInFrame(service: GameService, opts?: { reveal?: boolean }): void {
   currentService = service;
   storeOpenGame(service.id);
   const account = activeAccount();
+  const difficulty = getGameDifficulty(service.id);
   // The progress tracker follows the game being played.
   selectedGameId = service.id;
+  selectedDifficulty = difficulty;
   syncProgressGameSelect();
+  syncProgressDifficultySelect();
   void refreshProgress();
-  const url = launchUrl(service, account);
+  const url = launchUrl(service, account, difficulty);
   const frame = el("game-frame") as HTMLIFrameElement;
   if (currentLaunchUrl !== url) {
     currentLaunchUrl = url;
@@ -690,11 +774,41 @@ function openInFrame(service: GameService, opts?: { reveal?: boolean }): void {
     };
   }
   el("game-nav-title").textContent =
-    service.name + (account ? ` · ${account.username}` : " · guest");
+    service.name +
+    ` [${difficultyLabel(difficulty)}]` +
+    (account ? ` · ${account.username}` : " · guest");
   el("game-live").textContent = account
-    ? `Saving locally for ${account.username}.`
-    : "Guest — select an account to save progress.";
+    ? `Saving locally for ${account.username} on ${difficultyLabel(difficulty)}.`
+    : `Guest on ${difficultyLabel(difficulty)} — select an account to save progress.`;
+  syncGameDifficultySelect();
   if (reveal) showView("game");
+}
+
+function syncGameDifficultySelect(): void {
+  const sel = el("game-difficulty") as HTMLSelectElement | null;
+  if (!sel || !currentService) return;
+  if (sel.options.length === 0) {
+    for (const d of DIFFICULTIES) {
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = difficultyLabel(d);
+      sel.append(opt);
+    }
+  }
+  const want = getGameDifficulty(currentService.id);
+  if (sel.value !== want) sel.value = want;
+}
+
+function wireGameDifficultySelect(): void {
+  (el("game-difficulty") as HTMLSelectElement).addEventListener("change", (e) => {
+    if (!currentService) return;
+    const d = parseDifficulty((e.target as HTMLSelectElement).value);
+    setGameDifficulty(currentService.id, d);
+    // Reload the frame on the new tier (a fresh run) + refresh hub bests.
+    openInFrame(currentService, { reveal: false });
+    void refreshServices();
+    void renderInfoPanel(currentService);
+  });
 }
 
 // While a game screen is open, arrows/space belong to the game — stop them
@@ -812,6 +926,23 @@ function refreshProgressGameOptions(): void {
 }
 
 let progressGen = 0;
+// Difficulty the MY PROGRESS card is showing for the selected game.
+let selectedDifficulty: Difficulty = "normal";
+
+function syncProgressDifficultySelect(): void {
+  const sel = el("progress-difficulty") as HTMLSelectElement | null;
+  if (!sel) return;
+  if (sel.options.length === 0) {
+    for (const d of DIFFICULTIES) {
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = difficultyLabel(d);
+      sel.append(opt);
+    }
+  }
+  if (sel.value !== selectedDifficulty) sel.value = selectedDifficulty;
+}
+
 async function refreshProgress(): Promise<void> {
   // Generation guard: overlapping calls (tile click + refreshAll, select
   // change + game over…) interleave across awaits and would append twice.
@@ -824,19 +955,20 @@ async function refreshProgress(): Promise<void> {
   const game = selectedGame();
   // MY PROGRESS is per-account — hide the whole card when logged out.
   el("progress-card").hidden = !account;
-  progressCard?.setBadge(game.name);
+  progressCard?.setBadge(`${game.name} · ${difficultyLabel(selectedDifficulty)}`);
   if (!account) {
     box.innerHTML = `<p class="hint">Create + select an account to see its ${game.name} progress.</p>`;
     return;
   }
   const rows = await listProgressForAccount(account.id);
   if (gen !== progressGen) return;
-  const prog = rows.find((r) => r.gameId === game.id);
+  const prog = rows.find((r) => r.gameId === game.id && r.difficulty === selectedDifficulty);
   const plays = prog?.totalPlays ?? 0;
   const plural = plays === 1 ? "" : "s";
   const lastDate = prog?.lastPlayedAt
     ? new Date(prog.lastPlayedAt).toLocaleString()
     : "—";
+  const diffName = difficultyLabel(selectedDifficulty);
   const grid = document.createElement("div");
   grid.className = "stats";
   const cells: Array<{ v: string; k: string; tip: string }> = [
@@ -844,31 +976,31 @@ async function refreshProgress(): Promise<void> {
       v: String(prog?.highScore ?? 0),
       k: "HIGH",
       tip:
-        `<b>HIGH · ${esc(game.name)}</b><br>` +
-        `Best of <b>${esc(account.username)}</b>: ` +
+        `<b>HIGH · ${esc(game.name)} [${esc(diffName)}]</b><br>` +
+        `Best of <b>${esc(account.username)}</b> on ${esc(diffName)}: ` +
         `<b>${prog?.highScore ?? 0}</b> across ${plays} play${plural}.`,
     },
     {
       v: String(plays),
       k: "PLAYS",
       tip:
-        `<b>PLAYS · ${esc(game.name)}</b><br>` +
-        `${plays} finished run${plural} saved locally for ` +
+        `<b>PLAYS · ${esc(game.name)} [${esc(diffName)}]</b><br>` +
+        `${plays} finished ${esc(diffName.toLowerCase())} run${plural} saved locally for ` +
         `<b>${esc(account.username)}</b>.`,
     },
     {
       v: String(prog?.lastScore ?? 0),
       k: "LAST",
       tip:
-        `<b>LAST · ${esc(game.name)}</b><br>` +
-        `Most recent score: <b>${prog?.lastScore ?? 0}</b><br>${esc(lastDate)}.`,
+        `<b>LAST · ${esc(game.name)} [${esc(diffName)}]</b><br>` +
+        `Most recent ${esc(diffName.toLowerCase())} score: <b>${prog?.lastScore ?? 0}</b><br>${esc(lastDate)}.`,
     },
     {
       v: plays > 0 ? String(Math.round((prog?.totalScore ?? 0) / plays)) : "—",
       k: "AVG",
       tip:
-        `<b>AVG · ${esc(game.name)}</b><br>` +
-        `Average over ${plays} play${plural} ` +
+        `<b>AVG · ${esc(game.name)} [${esc(diffName)}]</b><br>` +
+        `Average over ${plays} ${esc(diffName.toLowerCase())} play${plural} ` +
         `(total ${prog?.totalScore ?? 0}).`,
     },
   ];
@@ -879,12 +1011,21 @@ async function refreshProgress(): Promise<void> {
     const b = document.createElement("b");
     b.textContent = v;
     const s = document.createElement("span");
-    s.textContent = `${account.username} · ${k}`;
+    s.textContent = `${account.username} · ${diffName} · ${k}`;
     d.append(b, s);
     attachHoverPopup(d, () => tip);
     grid.append(d);
   }
   box.append(grid);
+
+  // All tiers at a glance so every difficulty shows in progress.
+  const byDiff = document.createElement("p");
+  byDiff.className = "hint";
+  byDiff.textContent = DIFFICULTIES.map((d) => {
+    const r = rows.find((x) => x.gameId === game.id && x.difficulty === d);
+    return `${difficultyLabel(d)} best ${r?.highScore ?? 0} · ${r?.totalPlays ?? 0} plays`;
+  }).join(" — ");
+  box.append(byDiff);
 
   const history = await listSessions(account.id, game.id, 8);
   if (gen !== progressGen) return;
@@ -897,11 +1038,11 @@ async function refreshProgress(): Promise<void> {
     for (const h of history) {
       const li = document.createElement("li");
       li.tabIndex = 0;
-      li.textContent = `${new Date(h.playedAt).toLocaleString()} — score ${h.score}`;
+      li.textContent = `${new Date(h.playedAt).toLocaleString()} — [${difficultyLabel(h.difficulty)}] score ${h.score}`;
       attachHoverPopup(
         li,
         () =>
-          `<b>${esc(game.name)} run</b><br>` +
+          `<b>${esc(game.name)} run [${esc(difficultyLabel(h.difficulty))}]</b><br>` +
           `Score <b>${h.score}</b><br>` +
           `${esc(new Date(h.playedAt).toLocaleString())}<br>` +
           `${esc(account.username)} · saved locally`
@@ -914,6 +1055,13 @@ async function refreshProgress(): Promise<void> {
 function wireProgressSelect(): void {
   (el("progress-game") as HTMLSelectElement).addEventListener("change", (e) => {
     selectedGameId = (e.target as HTMLSelectElement).value;
+    // Follow the newly selected game's difficulty in the progress card.
+    selectedDifficulty = getGameDifficulty(selectedGameId);
+    syncProgressDifficultySelect();
+    void refreshProgress();
+  });
+  (el("progress-difficulty") as HTMLSelectElement).addEventListener("change", (e) => {
+    selectedDifficulty = parseDifficulty((e.target as HTMLSelectElement).value);
     void refreshProgress();
   });
 }
@@ -954,6 +1102,7 @@ interface ShooterEvent {
   type?: string;
   gameId?: string;
   score?: number;
+  difficulty?: string;
 }
 
 function wireGameEvents(): void {
@@ -961,10 +1110,27 @@ function wireGameEvents(): void {
     const msg = ev.data;
     if (!msg || msg.source !== "space-shooter") return;
     const account = activeAccount();
+    const eventDifficulty = parseDifficulty(msg.difficulty ?? getGameDifficulty(msg.gameId ?? selectedGameId));
     if (msg.type === "SCORE_TICK" && typeof msg.score === "number") {
       el("game-live").textContent = account
-        ? `${account.username} playing… live score ${msg.score}`
-        : `guest playing… live score ${msg.score}`;
+        ? `${account.username} playing [${difficultyLabel(eventDifficulty)}]… live score ${msg.score}`
+        : `guest playing [${difficultyLabel(eventDifficulty)}]… live score ${msg.score}`;
+      return;
+    }
+    if (msg.type === "DIFFICULTY" && msg.difficulty) {
+      // Player picked a tier inside the game title screen — mirror it in the hub.
+      const gid = msg.gameId && GAME_SERVICES.some((s) => s.id === msg.gameId)
+        ? msg.gameId
+        : (currentService?.id ?? selectedGameId);
+      setGameDifficulty(gid, eventDifficulty);
+      if (gid === selectedGameId) {
+        selectedDifficulty = eventDifficulty;
+        syncProgressDifficultySelect();
+        void refreshProgress();
+      }
+      syncGameDifficultySelect();
+      void refreshServices();
+      if (infoService && infoService.id === gid) void renderInfoPanel(infoService);
       return;
     }
     if (msg.type === "QUIT_TO_HUB") {
@@ -981,14 +1147,18 @@ function wireGameEvents(): void {
         msg.gameId && GAME_SERVICES.some((s) => s.id === msg.gameId)
           ? msg.gameId
           : "space-shooter";
-      const { progress } = await saveRun(account.id, gameId, msg.score);
+      const { progress } = await saveRun(account.id, gameId, msg.score, eventDifficulty);
       toast(
-        `Saved locally: ${account.username} scored ${msg.score} (best ${progress.highScore}, ${progress.totalPlays} plays).`
+        `Saved locally: ${account.username} scored ${msg.score} on ${difficultyLabel(eventDifficulty)} (best ${progress.highScore}, ${progress.totalPlays} plays).`
       );
-      el("game-live").textContent = `Game over — ${msg.score} saved locally (IndexedDB) for ${account.username}.`;
+      el("game-live").textContent = `Game over — ${msg.score} [${difficultyLabel(eventDifficulty)}] saved locally (IndexedDB) for ${account.username}.`;
       if (selectedGameId !== gameId) {
         selectedGameId = gameId;
         syncProgressGameSelect();
+      }
+      if (selectedDifficulty !== eventDifficulty) {
+        selectedDifficulty = eventDifficulty;
+        syncProgressDifficultySelect();
       }
       await refreshAll();
     }
@@ -1001,6 +1171,7 @@ async function refreshAll(): Promise<void> {
   await refreshAccounts();
   await refreshServices();
   refreshProgressGameOptions();
+  syncProgressDifficultySelect();
   await refreshProgress();
   await renderBestBars();
   await renderAllProgress();
@@ -1051,12 +1222,18 @@ async function boot(): Promise<void> {
   // Keep the stored latest progress visible even before any new run.
   if (activeId) {
     for (const s of GAME_SERVICES) {
-      const p = await getProgress(activeId, s.id).catch(() => null);
-      if (!p) await ensureProgress(activeId, s.id).catch(() => undefined);
+      for (const d of DIFFICULTIES) {
+        const p = await getProgress(activeId, s.id, d).catch(() => null);
+        if (!p) await ensureProgress(activeId, s.id, d).catch(() => undefined);
+      }
     }
   }
 
+  // Progress card starts on the active game's difficulty.
+  selectedDifficulty = getGameDifficulty(selectedGameId);
+
   wireGameNav();
+  wireGameDifficultySelect();
   wireScrollLock();
   wireDashboardSearch();
   wireInfoPanel();

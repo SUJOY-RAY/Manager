@@ -45,11 +45,14 @@ export const localStore = {
   recordGameResult,
 };
 
+import type { Difficulty } from "./difficulty";
+
 // ---------- web backend (TODO) ----------
 
 export interface WebRunPayload {
   accountId: string;
   gameId: string;
+  difficulty: Difficulty;
   score: number;
   playedAt: number;
 }
@@ -65,10 +68,15 @@ export async function recordGameResultWeb(
  * Single entry point for saving a finished run. Today this always writes
  * locally; when the web backend lands it will fan out based on getSaveTarget().
  */
-export function saveRun(accountId: string, gameId: string, score: number) {
+export function saveRun(
+  accountId: string,
+  gameId: string,
+  score: number,
+  difficulty: Difficulty = "normal"
+) {
   if (getSaveTarget() === "web") {
     // Guard: unreachable via UI today, but never lose a run if it happens.
-    return recordGameResult(accountId, gameId, score);
+    return recordGameResult(accountId, gameId, score, difficulty);
   }
-  return recordGameResult(accountId, gameId, score);
+  return recordGameResult(accountId, gameId, score, difficulty);
 }

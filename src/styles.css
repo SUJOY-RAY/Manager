@@ -401,6 +401,33 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
 }
 .tile-name { margin: 0; font-size: 13px; text-align: center; color: var(--text); }
 .tile-best { color: var(--muted); font-size: 11px; font-weight: 600; }
+/* Per-game difficulty picker on each dashboard tile. */
+.tile-diff { position: relative; z-index: 2; }
+.tile-diff-select {
+  flex: none; width: auto; max-width: 100%;
+  font-size: 11px; font-weight: 600; padding: 4px 24px 4px 8px;
+  border-radius: 12px; cursor: pointer;
+}
+.diff-pill {
+  display: inline-block; min-width: 52px; text-align: center;
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  padding: 1px 8px; font-weight: 700; font-size: 11px; color: var(--text);
+  background: rgba(255, 255, 255, 0.7);
+}
+.diff-easy { border-color: #2e7d32; }
+.diff-normal { border-color: var(--ink); background: var(--ink); color: var(--ink-text); }
+.diff-hard { border-color: #8b0000; }
+/* Difficulty pickers in the game navbar, info panel and progress card. */
+#game-difficulty {
+  flex: none; width: auto;
+  background: rgba(255, 255, 255, 0.12); color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px; padding: 4px 8px; font-size: 12px;
+}
+#game-difficulty option { color: #111; }
+#info-difficulty { flex: 1; }
+#progress-game { flex: 1; }
+#progress-difficulty { flex: none; width: min(100%, 180px); }
 /* Minimum 32px touch targets (proper control standards). */
 .kebab { min-width: 32px; min-height: 32px; }
 .tile-hover {

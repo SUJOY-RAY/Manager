@@ -37,11 +37,13 @@ export const GAME_SERVICES: GameService[] = [
 /** Build the URL the hub embeds / opens for a given account. */
 export function launchUrl(
   service: GameService,
-  account?: { id: string; username: string } | null
+  account?: { id: string; username: string } | null,
+  difficulty?: string
 ): string {
   const url = new URL(service.devUrl);
   url.searchParams.set("embed", "1");
   url.searchParams.set("gameId", service.id);
+  if (difficulty) url.searchParams.set("difficulty", difficulty);
   if (account) {
     url.searchParams.set("accountId", account.id);
     url.searchParams.set("accountName", account.username);
