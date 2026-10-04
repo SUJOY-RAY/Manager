@@ -461,6 +461,7 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
 #game-stage {
   position: relative; flex: none;
   width: min(100%, calc((100vh - 180px) * 4 / 3), calc((100dvh - 180px) * 4 / 3));
+  container-type: inline-size;
 }
 /* Navbar hides until the corner button toggles it open. */
 /* Collapsible in-game menu: only the whitish toggle shows until opened. */
@@ -468,6 +469,7 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
   position: absolute; top: 10px; right: 10px; z-index: 5;
   display: flex; align-items: center; gap: 8px;
   width: max-content; max-width: calc(100% - 20px);
+  min-width: 0; box-sizing: border-box;
   padding: 0; background: transparent;
   border: 1px solid transparent; border-radius: 999px;
   color: #fff;
@@ -480,6 +482,10 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
 }
 #game-stage.open #game-navbar,
 #game-navbar:focus-within {
+  left: 10px;
+  width: auto;
+  min-width: 0;
+  overflow: hidden;
   background: rgba(17, 17, 17, 0.72);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
   backdrop-filter: blur(16px) saturate(1.2);
@@ -487,7 +493,22 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
   padding: 6px 8px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
 }
-#game-nav-title { font-weight: 700; font-size: 13px; white-space: nowrap; }
+/* Open state uses a real flex row (not display:contents) so long titles /
+   selects can shrink with ellipsis instead of spilling past the stage. */
+#game-stage.open #game-navbar .nav-items,
+#game-navbar:focus-within .nav-items {
+  display: flex; align-items: center; gap: 8px;
+  flex: 1 1 auto; min-width: 0;
+}
+#game-nav-title {
+  font-weight: 800; font-size: 14px; white-space: nowrap;
+  flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis;
+}
+#game-difficulty {
+  flex: 0 1 auto; min-width: 0; max-width: 140px;
+  overflow: hidden; text-overflow: ellipsis;
+}
 #game-navbar #game-live { color: #cfcfcf; }
 #game-navbar .ghost { border-color: rgba(255, 255, 255, 0.3); color: #fff; height: 32px; padding: 0 12px; display: inline-flex; align-items: center; }
 #game-navbar .ghost:hover { border-color: #fff; }
@@ -518,10 +539,33 @@ ul.sessions li { padding: 2px 0; border-radius: 4px; }
   aspect-ratio: 4 / 3;
   height: auto;
 }
-#game-nav-title { font-weight: 800; font-size: 14px; white-space: nowrap; }
-#game-live { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-spacer { flex: 1; }
+#game-live { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-spacer { flex: 1 1 auto; min-width: 0; }
+#game-back, #open-tab, #game-quit, #game-nav-toggle { flex: none; }
 #game-quit { white-space: nowrap; }
+/* Narrow stage (short/horizontal viewport => height-fitted 4:3 box gets tiny):
+   hide the nice-to-have live line + spacer first, then tighten the rest so the
+   title, difficulty and Quit stay fully visible inside the pill. */
+@container (max-width: 560px) {
+  #game-live, .nav-spacer { display: none; }
+  #game-stage.open #game-navbar .nav-items,
+  #game-navbar:focus-within .nav-items { gap: 6px; }
+  #game-navbar { gap: 6px; }
+  #game-nav-title { font-size: 12px; max-width: 44cqw; }
+  #game-difficulty { max-width: 30cqw; font-size: 12px; }
+  #game-navbar .ghost { padding: 0 10px; font-size: 12px; height: 30px; }
+}
+@container (max-width: 380px) {
+  #open-tab { display: none; }
+  #game-nav-title { max-width: 38cqw; }
+  #game-difficulty { max-width: 28cqw; }
+}
+/* Fallback for browsers without container queries: short landscape windows
+   produce the same narrow stage, so apply the same triage. */
+@media (max-height: 500px) {
+  #game-stage.open #game-live, #game-navbar:focus-within #game-live { display: none; }
+  #game-stage.open .nav-spacer, #game-navbar:focus-within .nav-spacer { display: none; }
+}
 #game-frame {
   display: block;
   width: 100%;
