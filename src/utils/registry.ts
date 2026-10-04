@@ -26,7 +26,7 @@ export const GAME_SERVICES: GameService[] = [
       "Canvas arcade shooter. Dodge, shoot, survive. Scores stream back to the hub.",
     devUrl: "http://localhost:5101",
     port: 5101,
-    controls: "Arrows / WASD move · Space fire up · Z/X fire left/right · R restart · Q quit",
+    controls: "Arrows / WASD move · X/Space fire up · Z/C fire sides · Z+X/X+C diagonals · R restart · Q quit",
     accent: "#00dcff",
     icon: "/icons/space-shooter.svg",
     genre: "Arcade",
