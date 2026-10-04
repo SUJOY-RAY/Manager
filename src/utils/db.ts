@@ -250,10 +250,12 @@ export async function createAccount(
     await tx(db, ["accounts"], "readwrite", (t) =>
       t.objectStore("accounts").add(account)
     );
-    // Every new account gets fresh progress entries (all difficulties).
-    await ensureProgressRow(db, account.id, "space-shooter", "easy");
-    await ensureProgressRow(db, account.id, "space-shooter", "normal");
-    await ensureProgressRow(db, account.id, "space-shooter", "hard");
+    // Every new account gets fresh progress entries (all games × difficulties).
+    for (const gameId of ["space-shooter", "real-boxing"]) {
+      await ensureProgressRow(db, account.id, gameId, "easy");
+      await ensureProgressRow(db, account.id, gameId, "normal");
+      await ensureProgressRow(db, account.id, gameId, "hard");
+    }
     return account;
   } finally {
     db.close();

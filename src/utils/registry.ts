@@ -20,8 +20,9 @@ export interface GameService {
 
 /**
  * Base URL of a game service. Locally it's localhost; in production (Vercel)
- * it comes from the `VITE_SPACE_SHOOTER_URL` env var pointing at the
- * deployed game project. Baked in at build time — redeploy after changing it.
+ * it comes from the `VITE_<GAME>_URL` env var (e.g. VITE_SPACE_SHOOTER_URL,
+ * VITE_REAL_BOXING_URL) pointing at the deployed game project.
+ * Baked in at build time — redeploy after changing it.
  */
 function gameUrl(envName: string, fallback: string): string {
   const v = (import.meta.env[envName] as string | undefined)?.trim();
@@ -41,6 +42,19 @@ export const GAME_SERVICES: GameService[] = [
     icon: "/icons/space-shooter.svg",
     genre: "Arcade",
     blurb: "Click to launch Space Shooter in the hub player. Progress auto-saves to your active account.",
+  },
+  {
+    id: "real-boxing",
+    name: "Real Boxing",
+    description:
+      "Canvas boxing duel vs CPU. Jab, cross, uppercuts, body shots, block and dodge. Scores stream back to the hub.",
+    devUrl: gameUrl("VITE_REAL_BOXING_URL", "http://localhost:5102"),
+    port: 5102,
+    controls: "A+Space jab · L+Space cross · A+L block · Up/Down+A left upper/body · Up/Down+L right upper/body · Left/Right move · W dodge · R restart · Q quit · 1/2/3 difficulty",
+    accent: "#ff4d4d",
+    icon: "/icons/real-boxing.svg",
+    genre: "Sports",
+    blurb: "Click to launch Real Boxing in the hub player. Progress auto-saves to your active account.",
   },
 ];
 

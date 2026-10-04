@@ -90,7 +90,7 @@ async function refreshAccounts(): Promise<void> {
   const box = el("accounts");
   box.innerHTML = "";
   if (accounts.length === 0) {
-    box.innerHTML = `<p class="hint">No accounts yet — create one to start tracking Space Shooter progress.</p>`;
+    box.innerHTML = `<p class="hint">No accounts yet — create one to start tracking game progress.</p>`;
   }
   for (const a of accounts) {
     const div = document.createElement("div");
@@ -797,7 +797,7 @@ function openInFrame(service: GameService, opts?: { reveal?: boolean }): void {
         "Game URL points at the hub itself — not loading.";
       toast(
         `"${service.name}" URL points at the hub itself. ` +
-          "Set VITE_SPACE_SHOOTER_URL to the Space Shooter deployment and redeploy."
+          `Set ${service.id === "real-boxing" ? "VITE_REAL_BOXING_URL" : "VITE_SPACE_SHOOTER_URL"} to the ${service.name} deployment and redeploy.`
       );
       syncGameDifficultySelect();
       if (reveal) showView("game");
@@ -1443,7 +1443,7 @@ function wireRightbar(): void {
 
 // ---------- incoming game events (postMessage from microservices) ----------
 
-interface ShooterEvent {
+interface GameEvent {
   source?: string;
   type?: string;
   gameId?: string;
@@ -1451,10 +1451,13 @@ interface ShooterEvent {
   difficulty?: string;
 }
 
+const GAME_SOURCES = new Set(GAME_SERVICES.map((s) => s.id));
+
 function wireGameEvents(): void {
-  window.addEventListener("message", async (ev: MessageEvent<ShooterEvent>) => {
+  window.addEventListener("message", async (ev: MessageEvent<GameEvent>) => {
     const msg = ev.data;
-    if (!msg || msg.source !== "space-shooter") return;
+    // Accept events from any registered game (source is the game id).
+    if (!msg || typeof msg.source !== "string" || !GAME_SOURCES.has(msg.source)) return;
     const account = activeAccount();
     const eventDifficulty = parseDifficulty(msg.difficulty ?? getGameDifficulty(msg.gameId ?? selectedGameId));
     if (msg.type === "SCORE_TICK" && typeof msg.score === "number") {
@@ -1492,7 +1495,9 @@ function wireGameEvents(): void {
       const gameId =
         msg.gameId && GAME_SERVICES.some((s) => s.id === msg.gameId)
           ? msg.gameId
-          : "space-shooter";
+          : (msg.source && GAME_SERVICES.some((s) => s.id === msg.source)
+              ? msg.source!
+              : (currentService?.id ?? selectedGameId));
       const { progress } = await saveRun(account.id, gameId, msg.score, eventDifficulty);
       toast(
         `Saved locally: ${account.username} scored ${msg.score} on ${difficultyLabel(eventDifficulty)} (best ${progress.highScore}, ${progress.totalPlays} plays).`
@@ -1552,7 +1557,7 @@ async function boot(): Promise<void> {
       pwInput.value = "";
       activeId = acc.id;
       localStorage.setItem(ACTIVE_KEY, acc.id);
-      toast(`Account "${acc.username}" created with a Space Shooter entry.`);
+      toast(`Account "${acc.username}" created with progress entries for all games.`);
       await refreshAll();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Could not create account.");
