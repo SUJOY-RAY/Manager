@@ -613,17 +613,27 @@ function isSidebarOpen(): boolean {
   return !document.body.classList.contains("sidebar-collapsed");
 }
 
-function applySidebar(open: boolean): void {
+function applySidebar(open: boolean, persist = true): void {
   document.body.classList.toggle("sidebar-collapsed", !open);
   (el("sidebar-toggle") as HTMLButtonElement).setAttribute(
     "aria-expanded",
     String(open)
   );
-  try {
-    localStorage.setItem(SIDEBAR_KEY, open ? "1" : "0");
-  } catch {
-    /* ignore */
+  const aside = el("sidebar");
+  aside.classList.remove("dragging");
+  aside.style.transform = "";
+  // In drawer mode the collapsed rail stays off-canvas (visibility:hidden
+  // in CSS) — keep it out of the a11y tree too.
+  if (window.innerWidth <= 900) aside.setAttribute("aria-hidden", String(!open));
+  else aside.removeAttribute("aria-hidden");
+  if (persist) {
+    try {
+      localStorage.setItem(SIDEBAR_KEY, open ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
   }
+  syncScrim();
 }
 
 function wireSidebar(): void {
@@ -634,8 +644,11 @@ function wireSidebar(): void {
   } catch {
     stored = null;
   }
-  // Default: open on wide screens, drawer-closed on narrow ones.
-  applySidebar(stored !== null ? stored === "1" : window.innerWidth > 900);
+  // Default: open on wide screens, drawer-closed on narrow ones. A stored
+  // desktop "open" must not leave the drawer covering a phone screen — in
+  // drawer mode always start closed without clobbering the desktop pref.
+  if (window.innerWidth <= 900) applySidebar(false, false);
+  else applySidebar(stored !== null ? stored === "1" : true);
 }
 
 // ---------- sub-page views (dashboard ⇄ accounts, like the game stage) ----------
@@ -699,6 +712,8 @@ function showView(name: ViewName): void {
   (el("nav-progress") as HTMLButtonElement).classList.toggle("active", name === "progress");
   // Left-menu navigation always lands at the top of the center box.
   document.querySelector("main")?.scrollTo({ top: 0 });
+  // Entering/leaving the game view changes drawer visibility (in-game CSS).
+  syncScrim();
 }
 
 /** Boot navigation: reopen the stored game, or fall back to the stored view. */
@@ -1133,17 +1148,284 @@ function wireProgressSelect(): void {
 
 const RIGHTBAR_KEY = "gm.rightOpen";
 
-function setRightbar(open: boolean): void {
+function isRightbarOpen(): boolean {
+  return !document.body.classList.contains("right-collapsed");
+}
+
+function setRightbar(open: boolean, persist = true): void {
   document.body.classList.toggle("right-collapsed", !open);
   (el("rightbar-toggle") as HTMLButtonElement).setAttribute(
     "aria-expanded",
     String(open)
   );
-  try {
-    localStorage.setItem(RIGHTBAR_KEY, open ? "1" : "0");
-  } catch {
-    /* ignore */
+  const aside = el("rightbar");
+  aside.classList.remove("dragging");
+  aside.style.transform = "";
+  if (window.innerWidth <= 1100) aside.setAttribute("aria-hidden", String(!open));
+  else aside.removeAttribute("aria-hidden");
+  if (persist) {
+    try {
+      localStorage.setItem(RIGHTBAR_KEY, open ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
   }
+  syncScrim();
+}
+
+// ---------- tap-outside scrim (closes overlay drawers on narrow screens) ----------
+
+/** True when a drawer is visibly overlaying the page (not in-flow, not in-game). */
+function drawerOverlayOpen(): boolean {
+  // Breakpoints mirror the styles.css drawer media queries.
+  const w = window.innerWidth;
+  const inGame = document.body.classList.contains("in-game");
+  const rightOverlay =
+    w <= 1100 &&
+    !inGame &&
+    !document.body.classList.contains("right-collapsed");
+  const leftOverlay =
+    w <= 900 && !document.body.classList.contains("sidebar-collapsed");
+  return rightOverlay || leftOverlay;
+}
+
+function syncScrim(): void {
+  (el("scrim") as HTMLElement).hidden = !drawerOverlayOpen();
+}
+
+function wireScrim(): void {
+  el("scrim").addEventListener("click", () => {
+    applySidebar(false);
+    setRightbar(false);
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && drawerOverlayOpen() && el("auth-modal").hidden) {
+      applySidebar(false);
+      setRightbar(false);
+    }
+  });
+  // Shrinking into drawer mode with a rail open would cover the screen —
+  // park it closed (without persisting, so the desktop pref survives).
+  let lastW = window.innerWidth;
+  window.addEventListener("resize", () => {
+    const w = window.innerWidth;
+    if (w <= 900 && lastW > 900 && isSidebarOpen()) applySidebar(false, false);
+    if (w <= 1100 && lastW > 1100 && isRightbarOpen()) setRightbar(false, false);
+    // Growing back out clears the off-canvas a11y flags / drag state.
+    if (w > 900) {
+      el("sidebar").removeAttribute("aria-hidden");
+      el("sidebar").classList.remove("dragging");
+      el("sidebar").style.transform = "";
+    }
+    if (w > 1100) {
+      el("rightbar").removeAttribute("aria-hidden");
+      el("rightbar").classList.remove("dragging");
+      el("rightbar").style.transform = "";
+    }
+    lastW = w;
+    syncScrim();
+  });
+}
+
+// ---------- swipe drawers (Android-style edge swipe + swipe-to-close) ----------
+
+function leftDrawerMode(): boolean {
+  return window.innerWidth <= 900;
+}
+
+function rightDrawerMode(): boolean {
+  return (
+    window.innerWidth <= 1100 &&
+    !document.body.classList.contains("in-game")
+  );
+}
+
+interface DrawerDrag {
+  side: "left" | "right";
+  mode: "open" | "close";
+  startX: number;
+  startY: number;
+  startT: number;
+  lastX: number;
+  width: number;
+  active: boolean;
+  cancelled: boolean;
+}
+
+function wireSwipeDrawers(): void {
+  const EDGE = 24;
+  let drag: DrawerDrag | null = null;
+
+  const drawerOf = (side: "left" | "right"): HTMLElement =>
+    side === "left" ? el("sidebar") : el("rightbar");
+
+  document.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length !== 1) {
+        drag = null;
+        return;
+      }
+      // Modals capture all gestures — never swipe drawers behind one.
+      if (!el("auth-modal").hidden) return;
+      const t = e.touches[0]!;
+      const target = e.target as HTMLElement | null;
+      // Text entry / dropdowns keep their own gestures.
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      ) {
+        return;
+      }
+      const x = t.clientX;
+      if (leftDrawerMode()) {
+        if (!isSidebarOpen() && x <= EDGE) {
+          drag = {
+            side: "left",
+            mode: "open",
+            startX: x,
+            startY: t.clientY,
+            lastX: x,
+            startT: performance.now(),
+            width: drawerOf("left").offsetWidth || Math.min(320, window.innerWidth * 0.85),
+            active: false,
+            cancelled: false,
+          };
+          return;
+        }
+        if (isSidebarOpen() && drawerOf("left").contains(target)) {
+          drag = {
+            side: "left",
+            mode: "close",
+            startX: x,
+            startY: t.clientY,
+            lastX: x,
+            startT: performance.now(),
+            width: drawerOf("left").getBoundingClientRect().width || Math.min(320, window.innerWidth * 0.85),
+            active: false,
+            cancelled: false,
+          };
+          return;
+        }
+      }
+      if (rightDrawerMode()) {
+        if (!isRightbarOpen() && x >= window.innerWidth - EDGE) {
+          drag = {
+            side: "right",
+            mode: "open",
+            startX: x,
+            startY: t.clientY,
+            lastX: x,
+            startT: performance.now(),
+            width: drawerOf("right").offsetWidth || Math.min(320, window.innerWidth * 0.85),
+            active: false,
+            cancelled: false,
+          };
+          return;
+        }
+        if (isRightbarOpen() && drawerOf("right").contains(target)) {
+          drag = {
+            side: "right",
+            mode: "close",
+            startX: x,
+            startY: t.clientY,
+            lastX: x,
+            startT: performance.now(),
+            width: drawerOf("right").getBoundingClientRect().width || Math.min(320, window.innerWidth * 0.85),
+            active: false,
+            cancelled: false,
+          };
+        }
+      }
+    },
+    { passive: true }
+  );
+
+  document.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!drag || drag.cancelled || e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      const dx = t.clientX - drag.startX;
+      const dy = t.clientY - drag.startY;
+      if (!drag.active) {
+        // Vertical scroll wins — hand the gesture back to the page.
+        if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) {
+          drag.cancelled = true;
+          drag = null;
+          return;
+        }
+        const want =
+          drag.side === "left"
+            ? drag.mode === "open"
+              ? dx
+              : -dx
+            : drag.mode === "open"
+              ? -dx
+              : dx;
+        if (want < 10) return;
+        drag.active = true;
+        drawerOf(drag.side).classList.add("dragging");
+        // Reveal the scrim under the incoming drawer.
+        (el("scrim") as HTMLElement).hidden = false;
+      }
+      drag.lastX = t.clientX;
+      const box = drawerOf(drag.side);
+      const w = drag.width;
+      if (drag.side === "left") {
+        const offset =
+          drag.mode === "open"
+            ? -(w - Math.max(0, Math.min(w, dx)))
+            : Math.max(-w, Math.min(0, dx));
+        box.style.transform = `translateX(${offset}px)`;
+      } else {
+        const offset =
+          drag.mode === "open"
+            ? w - Math.max(0, Math.min(w, -dx))
+            : Math.max(0, Math.min(w, dx));
+        box.style.transform = `translateX(${offset}px)`;
+      }
+    },
+    { passive: true }
+  );
+
+  const finish = (cancelled: boolean) => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    const box = drawerOf(d.side);
+    if (!d.active || d.cancelled || cancelled) {
+      box.classList.remove("dragging");
+      box.style.transform = "";
+      syncScrim();
+      return;
+    }
+    // Distance past halfway opens/keeps open; a fast flick decides too.
+    const travelled =
+      d.side === "left"
+        ? d.mode === "open"
+          ? d.lastX - d.startX
+          : d.startX - d.lastX
+        : d.mode === "open"
+          ? d.startX - d.lastX
+          : d.lastX - d.startX;
+    // A fast flick in the swipe direction counts even over a short distance.
+    const flick = travelled > 24 && performance.now() - d.startT < 300;
+    const shouldOpen =
+      d.mode === "open"
+        ? travelled > d.width * 0.35 || flick
+        : travelled < d.width * 0.65 && !flick;
+    // Clear the drag transform before toggling so the ease animates home.
+    box.classList.remove("dragging");
+    box.style.transform = "";
+    if (d.side === "left") applySidebar(shouldOpen);
+    else setRightbar(shouldOpen);
+  };
+
+  document.addEventListener("touchend", () => finish(false));
+  document.addEventListener("touchcancel", () => finish(true));
 }
 
 function wireRightbar(): void {
@@ -1155,7 +1437,8 @@ function wireRightbar(): void {
   } catch {
     stored = null;
   }
-  setRightbar(stored !== null ? stored === "1" : window.innerWidth > 1100);
+  if (window.innerWidth <= 1100) setRightbar(false, false);
+  else setRightbar(stored !== null ? stored === "1" : true);
 }
 
 // ---------- incoming game events (postMessage from microservices) ----------
@@ -1303,6 +1586,8 @@ async function boot(): Promise<void> {
   wireAuth();
   wireSidebar();
   wireRightbar();
+  wireScrim();
+  wireSwipeDrawers();
   wireNav();
   wireConsole();
   // Restore where the user was instead of resetting: reopen the current game

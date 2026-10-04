@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Game Manager Hub</title>
-  <script type="module" crossorigin src="/assets/index-_ea99Fij.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CrZQ7HDd.css">
+  <script type="module" crossorigin src="/assets/index-GJ7LvIon.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CIVfvJwf.css">
 </head>
 <body>
   <!-- Central parent container: everything in the hub renders through
@@ -99,10 +99,12 @@
       </div>
       <div class="card game-card">
         <div class="panel-head"><h2>ALL ACCOUNTS</h2></div>
-        <table class="rec-table">
-          <thead><tr><th>Account</th><th>Game</th><th>Difficulty</th><th>Best</th><th>Top 5</th><th>Plays</th><th>Last Played</th></tr></thead>
-          <tbody id="all-progress-tbody"></tbody>
-        </table>
+        <div class="rec-table-wrap">
+          <table class="rec-table">
+            <thead><tr><th>Account</th><th>Game</th><th>Difficulty</th><th>Best</th><th>Top 5</th><th>Plays</th><th>Last Played</th></tr></thead>
+            <tbody id="all-progress-tbody"></tbody>
+          </table>
+        </div>
       </div>
       <div class="card game-card" id="progress-card">
         <h2 id="progress-title">MY PROGRESS</h2>
@@ -145,6 +147,7 @@
       <div class="card hint-card"><span class="ic" data-icon="bulb"></span> Hover any <b>•••</b> on the right to access more options.</div>
     </aside>
   </div>
+  <div id="scrim" hidden></div>
   </div>
   <div id="auth-modal" class="modal-overlay" hidden>
     <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="auth-title">
