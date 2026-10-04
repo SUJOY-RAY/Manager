@@ -6,7 +6,7 @@ export interface GameService {
   id: string;
   name: string;
   description: string;
-  /** Local dev URL of the independently-running game service. */
+  /** Base URL of the independently-running game service. */
   devUrl: string;
   port: number;
   controls: string;
@@ -18,13 +18,23 @@ export interface GameService {
   blurb: string;
 }
 
+/**
+ * Base URL of a game service. Locally it's localhost; in production (Vercel)
+ * it comes from the `VITE_SPACE_SHOOTER_URL` env var pointing at the
+ * deployed game project. Baked in at build time — redeploy after changing it.
+ */
+function gameUrl(envName: string, fallback: string): string {
+  const v = (import.meta.env[envName] as string | undefined)?.trim();
+  return v ? v : fallback;
+}
+
 export const GAME_SERVICES: GameService[] = [
   {
     id: "space-shooter",
     name: "Space Shooter",
     description:
       "Canvas arcade shooter. Dodge, shoot, survive. Scores stream back to the hub.",
-    devUrl: "http://localhost:5101",
+    devUrl: gameUrl("VITE_SPACE_SHOOTER_URL", "http://localhost:5101"),
     port: 5101,
     controls: "Arrows / WASD move · X/Space fire up · Z/C fire sides · Z+X/X+C diagonals · R restart · Q quit",
     accent: "#00dcff",
