@@ -6,12 +6,12 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev-all.mjs",
-    "dev:hub": "vite --port 5000 --strictPort",
-    "dev:games": "npm run dev --prefix \"../Space Shooter\" -- --port 5101 --strictPort",
-    "dev:shooter": "npm run dev --prefix \"../Space Shooter\" -- --port 5101 --strictPort",
-    "dev:boxing": "npm run dev --prefix \"../real-boxing\" -- --port 5102 --strictPort",
+    "dev:hub": "vite --host --port 5000 --strictPort",
+    "dev:games": "npm run dev --prefix \"../Space Shooter\" -- --host --port 5101 --strictPort",
+    "dev:shooter": "npm run dev --prefix \"../Space Shooter\" -- --host --port 5101 --strictPort",
+    "dev:boxing": "npm run dev --prefix \"../real-boxing\" -- --host --port 5102 --strictPort",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --port 5000",
+    "preview": "vite preview --host --port 5000",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

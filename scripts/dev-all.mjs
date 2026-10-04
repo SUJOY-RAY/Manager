@@ -7,8 +7,21 @@
 
 import { spawn } from "node:child_process";
 import { exec } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// First non-internal IPv4 (e.g. 192.168.x.x) so phones on the same Wi-Fi
+// can open the hub. Falls back to localhost when offline.
+function lanIp() {
+  const nets = os.networkInterfaces();
+  for (const addrs of Object.values(nets)) {
+    for (const a of addrs ?? []) {
+      if (a.family === "IPv4" && !a.internal) return a.address;
+    }
+  }
+  return "localhost";
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const managerDir = path.resolve(here, "..");
@@ -43,17 +56,21 @@ console.log("🕹️  Game Manager — starting microservices…");
 console.log(`   hub           : ${managerDir} -> ${HUB_URL}`);
 console.log(`   space-shooter : ${shooterDir} -> ${SHOOTER_URL}`);
 console.log(`   real-boxing   : ${boxingDir} -> ${BOXING_URL}`);
+const LAN = lanIp();
+if (LAN !== "localhost") {
+  console.log(`   📱 on your phone (same Wi-Fi): http://${LAN}:5000`);
+}
 
-const hub = start("npx", ["vite", "--port", "5000", "--strictPort"], managerDir, "hub");
+const hub = start("npx", ["vite", "--host", "--port", "5000", "--strictPort"], managerDir, "hub");
 const shooter = start(
   "npm",
-  ["run", "dev", "--", "--port", "5101", "--strictPort"],
+  ["run", "dev", "--", "--host", "--port", "5101", "--strictPort"],
   shooterDir,
   "space-shooter"
 );
 const boxing = start(
   "npm",
-  ["run", "dev", "--", "--port", "5102", "--strictPort"],
+  ["run", "dev", "--", "--host", "--port", "5102", "--strictPort"],
   boxingDir,
   "real-boxing"
 );

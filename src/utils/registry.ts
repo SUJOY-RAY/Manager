@@ -19,14 +19,25 @@ export interface GameService {
 }
 
 /**
- * Base URL of a game service. Locally it's localhost; in production (Vercel)
- * it comes from the `VITE_<GAME>_URL` env var (e.g. VITE_SPACE_SHOOTER_URL,
+ * Base URL of a game service. In production (Vercel) it comes from the
+ * `VITE_<GAME>_URL` env var (e.g. VITE_SPACE_SHOOTER_URL,
  * VITE_REAL_BOXING_URL) pointing at the deployed game project.
  * Baked in at build time — redeploy after changing it.
+ *
+ * Locally (no env var) it reuses the hub's own hostname + the game's port,
+ * so phones on the same Wi-Fi (http://<pc-lan-ip>:5000) reach the games at
+ * http://<pc-lan-ip>:5101/5102 instead of a dead http://localhost:510x.
  */
-function gameUrl(envName: string, fallback: string): string {
+function gameUrl(envName: string, port: number): string {
   const v = (import.meta.env[envName] as string | undefined)?.trim();
-  return v ? v : fallback;
+  if (v) return v;
+  try {
+    const host = window.location.hostname;
+    if (host) return `http://${host}:${port}`;
+  } catch {
+    /* SSR / pre-render — fall through */
+  }
+  return `http://localhost:${port}`;
 }
 
 export const GAME_SERVICES: GameService[] = [
@@ -35,7 +46,7 @@ export const GAME_SERVICES: GameService[] = [
     name: "Space Shooter",
     description:
       "Canvas arcade shooter. Dodge, shoot, survive. Scores stream back to the hub.",
-    devUrl: gameUrl("VITE_SPACE_SHOOTER_URL", "http://localhost:5101"),
+    devUrl: gameUrl("VITE_SPACE_SHOOTER_URL", 5101),
     port: 5101,
     controls: "Arrows / WASD move · X/Space fire up · Z/C fire sides · Z+X/X+C diagonals · R restart · Q quit · M mute · touch: left pad moves, fire stick drag-to-aim",
     accent: "#00dcff",
@@ -48,7 +59,7 @@ export const GAME_SERVICES: GameService[] = [
     name: "Real Boxing",
     description:
       "Canvas boxing duel vs CPU. Jab, cross, uppercuts, body shots, block and dodge. Scores stream back to the hub.",
-    devUrl: gameUrl("VITE_REAL_BOXING_URL", "http://localhost:5102"),
+    devUrl: gameUrl("VITE_REAL_BOXING_URL", 5102),
     port: 5102,
     controls: "A+Space jab · L+Space cross · A+L block · Up/Down+A left upper/body · Up/Down+L right upper/body · Left/Right move · W dodge · R restart · Q quit · 1/2/3 difficulty",
     accent: "#ff4d4d",
