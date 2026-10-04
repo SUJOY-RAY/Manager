@@ -768,6 +768,29 @@ function openInFrame(service: GameService, opts?: { reveal?: boolean }): void {
   void refreshProgress();
   const url = launchUrl(service, account, difficulty);
   const frame = el("game-frame") as HTMLIFrameElement;
+  // Guard: a game URL that resolves to this hub page would embed the hub
+  // inside itself forever (recursive nesting). Refuse and explain instead —
+  // this means VITE_<GAME>_URL points at the hub's own deployment.
+  try {
+    const here = new URL(window.location.href);
+    const target = new URL(url);
+    if (target.origin === here.origin && target.pathname === here.pathname) {
+      currentLaunchUrl = "";
+      frame.src = "about:blank";
+      el("game-nav-title").textContent = `${service.name} · misconfigured`;
+      el("game-live").textContent =
+        "Game URL points at the hub itself — not loading.";
+      toast(
+        `"${service.name}" URL points at the hub itself. ` +
+          "Set VITE_SPACE_SHOOTER_URL to the Space Shooter deployment and redeploy."
+      );
+      syncGameDifficultySelect();
+      if (reveal) showView("game");
+      return;
+    }
+  } catch {
+    /* Unparseable URL — let the frame surface the failure. */
+  }
   if (currentLaunchUrl !== url) {
     currentLaunchUrl = url;
     frame.src = url;
