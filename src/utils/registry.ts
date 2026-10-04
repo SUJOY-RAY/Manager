@@ -36,7 +36,7 @@ export const GAME_SERVICES: GameService[] = [
       "Canvas arcade shooter. Dodge, shoot, survive. Scores stream back to the hub.",
     devUrl: gameUrl("VITE_SPACE_SHOOTER_URL", "http://localhost:5101"),
     port: 5101,
-    controls: "Arrows / WASD move · X/Space fire up · Z/C fire sides · Z+X/X+C diagonals · R restart · Q quit · touch: left pad moves, fire stick drag-to-aim",
+    controls: "Arrows / WASD move · X/Space fire up · Z/C fire sides · Z+X/X+C diagonals · R restart · Q quit · M mute · touch: left pad moves, fire stick drag-to-aim",
     accent: "#00dcff",
     icon: "/icons/space-shooter.svg",
     genre: "Arcade",
